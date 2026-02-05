@@ -63,9 +63,6 @@ dependencies {
 		exclude(group: "net.fabricmc.fabric-api")
 	}
 	
-	// TouhouLittleMaid-Orihime (Fabric 移植版) - 编译时依赖，用于 Mixin
-	// 使用 modCompileOnly 以便 Loom 正确处理 Fabric 模组依赖
-	modCompileOnly fileTree(dir: "${rootProject.projectDir}/TouhouLittleMaid-Orihime/build/libs", include: '*.jar')
 }
 
 processResources {

@@ -1,0 +1,90 @@
+name: Build Minecraft Mod
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+    paths:
+      - 'common/**'
+      - 'fabric/**'
+      - 'forge/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+      
+      - name: Build with Gradle
+        run: ./gradlew build --no-daemon -x test
+        continue-on-error: false
+      
+      - name: Upload Fabric Mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmdskin-fabric
+          path: |
+            fabric/build/libs/mmdskin-fabric-*.jar
+            !fabric/build/libs/*-dev*.jar
+            !fabric/build/libs/*-sources*.jar
+          if-no-files-found: error
+      
+      - name: Upload Forge Mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmdskin-forge
+          path: |
+            forge/build/libs/mmdskin-forge-*.jar
+            !forge/build/libs/*-dev*.jar
+            !forge/build/libs/*-sources*.jar
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download Fabric artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mmdskin-fabric
+          path: artifacts/fabric
+      
+      - name: Download Forge artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mmdskin-forge
+          path: artifacts/forge
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/fabric/*.jar
+            artifacts/forge/*.jar
+          generate_release_notes: true
