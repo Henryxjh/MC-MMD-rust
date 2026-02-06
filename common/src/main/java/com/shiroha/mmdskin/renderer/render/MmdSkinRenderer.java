@@ -7,7 +7,6 @@ import com.shiroha.mmdskin.renderer.core.RenderContext;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.culling.Frustum;
@@ -40,7 +39,6 @@ public class MmdSkinRenderer<T extends Entity> extends EntityRenderer<T> {
         // 检查模型缓存清理
         MMDModelManager.tick();
         
-        Minecraft MCinstance = Minecraft.getInstance();
         super.render(entityIn, entityYaw, tickDelta, matrixStackIn, bufferIn, packedLightIn);
         String animName = "";
         float bodyYaw = entityYaw;

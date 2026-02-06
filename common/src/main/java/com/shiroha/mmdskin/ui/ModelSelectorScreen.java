@@ -306,6 +306,11 @@ public class ModelSelectorScreen extends Screen {
         return false;
     }
 
+    @Override
+    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // 不渲染背景，保持透明无模糊
+    }
+
     /**
      * 模型卡片条目
      */
