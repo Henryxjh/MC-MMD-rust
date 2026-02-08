@@ -1,6 +1,7 @@
 package com.shiroha.mmdskin;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -255,6 +256,31 @@ public class NativeFunc {
 
         String resourcePath = "/natives/android-arm64/libmmd_engine.so";
         String soFileName = "libmmd_engine.so";
+
+        //直接将 libmmd_engine.so 写入 $JAVA_HOME/lib
+        var javaHome = System.getProperty("java.home");
+        logger.info("  JAVA_HOME=" + javaHome);
+        var javaLibDir = new File(javaHome, "lib");
+        var javaLibSoFile = new File(javaLibDir, soFileName);
+        if (javaLibSoFile.exists()) {
+            try {
+                System.load(javaLibSoFile.getAbsolutePath());
+                logger.info("[Android] " + javaLibSoFile.getAbsolutePath() + " 已加载");
+            } catch (Error e) {
+                logger.error("[Android] " + javaLibSoFile.getAbsolutePath() + " 加载失败：" + e.getMessage());
+            }
+        } else if (javaLibDir.canWrite()) {
+            try (InputStream is = getClass().getResourceAsStream(resourcePath)) {
+                Files.copy(is, javaLibSoFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                logger.info("[Android] 已将 libmmd_engine.so 解压至 " + javaLibSoFile.getAbsolutePath());
+                System.load(javaLibSoFile.getAbsolutePath());
+                logger.info("[Android] " + javaLibSoFile.getAbsolutePath() + " 已加载");
+                return;
+            } catch (IOException e) {
+                logger.error(e);
+            }
+        } else
+            logger.warn("[Android] JAVA_HOME无法写入，跳过。");
 
         try {
             logger.info("[Android] 策略1: System.loadLibrary(\"mmd_engine\")");
