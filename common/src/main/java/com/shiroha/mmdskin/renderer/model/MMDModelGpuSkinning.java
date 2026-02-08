@@ -609,7 +609,10 @@ public class MMDModelGpuSkinning implements IMMDModel {
         GL46C.glBindVertexArray(0);
         RenderSystem.activeTexture(GL46C.GL_TEXTURE0);
         
-        RenderSystem.getShader().clear();
+        ShaderInstance currentShader = RenderSystem.getShader();
+        if (currentShader != null) {
+            currentShader.clear();
+        }
         BufferUploader.reset();
     }
     

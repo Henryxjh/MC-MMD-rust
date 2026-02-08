@@ -11,6 +11,7 @@ import com.mojang.blaze3d.vertex.*;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -359,9 +360,14 @@ public class MMDModelNativeRender implements IMMDModel {
         vb.bind();
         vb.upload(rendered);
         
+        ShaderInstance shader = RenderSystem.getShader();
+        if (shader == null) {
+            VertexBuffer.unbind();
+            return;
+        }
         Matrix4f modelView = new Matrix4f(RenderSystem.getModelViewMatrix());
         Matrix4f projection = RenderSystem.getProjectionMatrix();
-        vb.drawWithShader(modelView, projection, RenderSystem.getShader());
+        vb.drawWithShader(modelView, projection, shader);
         
         VertexBuffer.unbind();
     }

@@ -448,9 +448,14 @@ public class MMDModelOpenGL implements IMMDModel {
         
         // 普通渲染模式
         if(MmdSkinClient.usingMMDShader == 0){
-            shaderProgram = RenderSystem.getShader().getId();
-            setUniforms(RenderSystem.getShader(), deliverStack);
-            RenderSystem.getShader().apply();
+            ShaderInstance mcShader = RenderSystem.getShader();
+            if (mcShader == null) {
+                logger.debug("RenderSystem.getShader() 返回 null，跳过本帧渲染");
+                return;
+            }
+            shaderProgram = mcShader.getId();
+            setUniforms(mcShader, deliverStack);
+            mcShader.apply();
         }
         if(MmdSkinClient.usingMMDShader == 1){
             shaderProgram = MMDShaderProgram;
@@ -724,7 +729,10 @@ public class MMDModelOpenGL implements IMMDModel {
         // 确保纹理单元恢复到 TEXTURE0
         RenderSystem.activeTexture(GL46C.GL_TEXTURE0);
 
-        RenderSystem.getShader().clear();
+        ShaderInstance currentShader = RenderSystem.getShader();
+        if (currentShader != null) {
+            currentShader.clear();
+        }
         BufferUploader.reset();
     }
 
