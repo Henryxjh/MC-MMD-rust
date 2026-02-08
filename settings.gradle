@@ -41,6 +41,9 @@ dependencyResolutionManagement {
 		maven { url = 'https://maven.neoforged.net/releases/' }
 		maven { url = 'https://bmclapi2.bangbang93.com/maven/' }
 
+		// Cardinal Components API (Ladysnake)
+		maven { url = 'https://maven.ladysnake.org/releases' }
+
 		// 仅从官方仓库解析 Forge 组件，避免无意义的回退请求
 		exclusiveContent {
 			forRepository {

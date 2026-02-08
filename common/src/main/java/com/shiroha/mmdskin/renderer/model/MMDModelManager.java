@@ -7,6 +7,7 @@ import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.ModelCache;
 import com.shiroha.mmdskin.renderer.core.RenderModeManager;
 import com.shiroha.mmdskin.renderer.model.factory.ModelFactoryRegistry;
+import com.shiroha.mmdskin.maid.MaidMMDModelManager;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -119,6 +120,7 @@ public class MMDModelManager {
      */
     public static void forceReloadAllModels() {
         modelCache.clear(MMDModelManager::disposeModel);
+        MaidMMDModelManager.invalidateLoadedModels();
         logger.info("强制重载所有模型完成");
     }
     
@@ -146,6 +148,7 @@ public class MMDModelManager {
     
     public static void ReloadModel() {
         modelCache.clear(MMDModelManager::disposeModel);
+        MaidMMDModelManager.invalidateLoadedModels();
         logger.info("模型已重载");
     }
 

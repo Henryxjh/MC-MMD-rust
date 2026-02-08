@@ -21,6 +21,8 @@ allprojects {
 		maven { url = 'https://maven.minecraftforge.net/' }
 		maven { url = 'https://maven.shedaniel.me/' }
 		maven { url = 'https://maven.terraformersmc.com/' }
+		// Cardinal Components API (Touhou Little Maid Fabric 移植版依赖)
+		maven { url = 'https://maven.ladysnake.org/releases' }
         // curseforge与modrinth平台仓库
         exclusiveContent {
             forRepository {

@@ -2,20 +2,21 @@ package com.shiroha.mmdskin.renderer.model;
 
 import com.shiroha.mmdskin.NativeFunc;
 import com.shiroha.mmdskin.config.ConfigManager;
-import com.shiroha.mmdskin.renderer.compat.IrisCompat;
 import com.shiroha.mmdskin.renderer.core.EyeTrackingHelper;
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.RenderContext;
 import com.shiroha.mmdskin.renderer.resource.MMDTextureManager;
-import com.shiroha.mmdskin.renderer.shader.GpuSkinningShader;
-import com.shiroha.mmdskin.renderer.shader.ToonShader;
+import com.shiroha.mmdskin.renderer.shader.SkinningComputeShader;
+import com.shiroha.mmdskin.renderer.shader.ToonShaderCpu;
 import com.shiroha.mmdskin.renderer.shader.ToonConfig;
+import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferUploader;
 import com.mojang.blaze3d.vertex.PoseStack;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -36,40 +37,63 @@ import java.nio.IntBuffer;
 
 /**
  * GPU 蒙皮 MMD 模型渲染器
- * 将蒙皮计算从 CPU 移到 GPU，大幅提升大面数模型性能
+ * 
+ * 使用 Compute Shader 在 GPU 上预计算蒙皮，然后通过 Minecraft 标准 ShaderInstance 管线渲染。
+ * 这样 Iris 可以正确拦截渲染着色器，解决光影下模型透明的问题。
+ * 
+ * 流程：
+ * 1. Compute Shader 读取原始顶点 + 骨骼矩阵 → 输出蒙皮后的顶点/法线
+ * 2. 使用 Minecraft 标准管线（RenderSystem.getShader()）进行渲染
+ * 3. Iris 拦截 ShaderInstance 替换为 G-buffer 着色器 → 光影正常工作
  */
 public class MMDModelGpuSkinning implements IMMDModel {
     private static final Logger logger = LogManager.getLogger();
     private static NativeFunc nf;
-    private static GpuSkinningShader gpuShader;
-    private static ToonShader toonShader;
+    private static SkinningComputeShader computeShader;
+    private static ToonShaderCpu toonShaderCpu;
     private static final ToonConfig toonConfig = ToonConfig.getInstance();
     
     // 模型数据
     private long model;
     private String modelDir;
     private int vertexCount;
-    private int boneCount;
     
-    // OpenGL 资源
+    // OpenGL 资源 - VAO
     private int vertexArrayObject;
     private int indexBufferObject;
+    
+    // 原始数据 VBO（静态，作为 Compute Shader 的 SSBO 输入）
     private int positionBufferObject;
     private int normalBufferObject;
     private int uv0BufferObject;
     private int boneIndicesBufferObject;
     private int boneWeightsBufferObject;
     
+    // Minecraft 标准顶点属性 VBO
+    private int colorBufferObject;
+    private int uv1BufferObject;
+    private int uv2BufferObject;
+    
+    // Compute Shader 输出缓冲区（每实例独立，同时作为 SSBO 和 VBO）
+    private int skinnedPositionsBuffer;
+    private int skinnedNormalsBuffer;
+    
     // 缓冲区（allocateDirect 分配，由 GC 回收）
-    @SuppressWarnings("unused") // 保留引用防止 GC 过早回收
+    @SuppressWarnings("unused")
     private ByteBuffer posBuffer;
-    @SuppressWarnings("unused") // 保留引用防止 GC 过早回收
+    @SuppressWarnings("unused")
     private ByteBuffer norBuffer;
-    @SuppressWarnings("unused") // 保留引用防止 GC 过早回收
+    @SuppressWarnings("unused")
     private ByteBuffer uv0Buffer;
+    private ByteBuffer colorBuffer;
+    @SuppressWarnings("unused")
+    private ByteBuffer uv1Buffer;
+    private ByteBuffer uv2Buffer;
     private FloatBuffer boneMatricesBuffer;
     private FloatBuffer modelViewMatBuff;
     private FloatBuffer projMatBuff;
+    private FloatBuffer light0Buff;
+    private FloatBuffer light1Buff;
     
     // 预分配的骨骼矩阵复制缓冲区（避免每帧 allocateDirect）
     private ByteBuffer boneMatricesByteBuffer;
@@ -78,10 +102,30 @@ public class MMDModelGpuSkinning implements IMMDModel {
     private int vertexMorphCount = 0;
     private boolean morphDataUploaded = false;
     private FloatBuffer morphWeightsBuffer;
+    private ByteBuffer morphWeightsByteBuffer; // 预分配复用，避免每帧 allocateDirect
+    // Morph SSBO（每实例独立，避免多模型数据冲突）
+    private int morphOffsetsSSBO = 0;
+    private int morphWeightsSSBO = 0;
     
     private int indexElementSize;
     private int indexType;
     private Material[] mats;
+    private Material lightMapMaterial;
+    
+    // 光照方向
+    private Vector3f light0Direction, light1Direction;
+    
+    // 着色器属性位置（每帧根据当前着色器更新）
+    private int shaderProgram;
+    private int positionLocation, normalLocation;
+    private int uv0Location, uv1Location, uv2Location;
+    private int colorLocation;
+    // Iris 重命名的属性
+    private int I_positionLocation, I_normalLocation;
+    private int I_uv0Location, I_uv2Location, I_colorLocation;
+    
+    // 临时存储当前 PoseStack，供 renderNormal 使用
+    private PoseStack currentDeliverStack;
     
     // 时间追踪
     private long lastUpdateTime = -1;
@@ -93,16 +137,16 @@ public class MMDModelGpuSkinning implements IMMDModel {
     private MMDModelGpuSkinning() {}
     
     /**
-     * 创建 GPU 蒙皮模型
+     * 创建 GPU 蒙皮模型（Compute Shader 方案）
      */
     public static MMDModelGpuSkinning Create(String modelFilename, String modelDir, boolean isPMD, long layerCount) {
         if (nf == null) nf = NativeFunc.GetInst();
         
-        // 初始化 GPU 蒙皮着色器
-        if (gpuShader == null) {
-            gpuShader = new GpuSkinningShader();
-            if (!gpuShader.init()) {
-                logger.error("GPU 蒙皮着色器初始化失败，回退到 CPU 蒙皮");
+        // 初始化 Compute Shader（懒加载，全局共享）
+        if (computeShader == null) {
+            computeShader = new SkinningComputeShader();
+            if (!computeShader.init()) {
+                logger.error("蒙皮 Compute Shader 初始化失败，回退到 CPU 蒙皮");
                 return null;
             }
         }
@@ -128,12 +172,11 @@ public class MMDModelGpuSkinning implements IMMDModel {
         int vertexCount = (int) nf.GetVertexCount(model);
         int boneCount = nf.GetBoneCount(model);
         
-        // 检查骨骼数量是否超过 GPU 蒙皮支持的最大值
-        if (boneCount > GpuSkinningShader.MAX_BONES) {
-            logger.warn("模型骨骼数量 ({}) 超过 GPU 蒙皮最大支持 ({})，部分骨骼可能无法正确渲染", 
-                boneCount, GpuSkinningShader.MAX_BONES);
+        if (boneCount > SkinningComputeShader.MAX_BONES) {
+            logger.warn("模型骨骼数量 ({}) 超过最大支持 ({})，部分骨骼可能无法正确渲染", 
+                boneCount, SkinningComputeShader.MAX_BONES);
         }
-        logger.info("GPU 蒙皮模型加载: {} 顶点, {} 骨骼", vertexCount, boneCount);
+        logger.info("GPU 蒙皮模型加载（Compute Shader）: {} 顶点, {} 骨骼", vertexCount, boneCount);
         
         // 创建 VAO 和 VBO
         int vao = GL46C.glGenVertexArrays();
@@ -143,6 +186,9 @@ public class MMDModelGpuSkinning implements IMMDModel {
         int uv0Vbo = GL46C.glGenBuffers();
         int boneIdxVbo = GL46C.glGenBuffers();
         int boneWgtVbo = GL46C.glGenBuffers();
+        int colorVbo = GL46C.glGenBuffers();
+        int uv1Vbo = GL46C.glGenBuffers();
+        int uv2Vbo = GL46C.glGenBuffers();
         
         GL46C.glBindVertexArray(vao);
         
@@ -166,7 +212,7 @@ public class MMDModelGpuSkinning implements IMMDModel {
             default -> 0;
         };
         
-        // 原始顶点位置（静态，用于 GPU 蒙皮输入）- 使用线程安全复制
+        // 原始顶点位置（静态，用于 Compute Shader 输入）
         ByteBuffer posBuffer = ByteBuffer.allocateDirect(vertexCount * 12);
         posBuffer.order(ByteOrder.LITTLE_ENDIAN);
         int copiedPos = nf.CopyOriginalPositionsToBuffer(model, posBuffer, vertexCount);
@@ -176,7 +222,7 @@ public class MMDModelGpuSkinning implements IMMDModel {
         GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, posVbo);
         GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, posBuffer, GL46C.GL_STATIC_DRAW);
         
-        // 原始法线（静态）- 使用线程安全复制
+        // 原始法线（静态）
         ByteBuffer norBuffer = ByteBuffer.allocateDirect(vertexCount * 12);
         norBuffer.order(ByteOrder.LITTLE_ENDIAN);
         int copiedNor = nf.CopyOriginalNormalsToBuffer(model, norBuffer, vertexCount);
@@ -194,7 +240,7 @@ public class MMDModelGpuSkinning implements IMMDModel {
         GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv0Vbo);
         GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, uv0Buffer, GL46C.GL_STATIC_DRAW);
         
-        // 骨骼索引（静态，ivec4）- 使用线程安全复制
+        // 骨骼索引（静态，ivec4）
         ByteBuffer boneIndicesByteBuffer = ByteBuffer.allocateDirect(vertexCount * 16);
         boneIndicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
         int copiedIdx = nf.CopyBoneIndicesToBuffer(model, boneIndicesByteBuffer, vertexCount);
@@ -205,7 +251,7 @@ public class MMDModelGpuSkinning implements IMMDModel {
         GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, boneIdxVbo);
         GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, boneIndicesBuffer, GL46C.GL_STATIC_DRAW);
         
-        // 骨骼权重（静态，vec4）- 使用线程安全复制
+        // 骨骼权重（静态，vec4）
         ByteBuffer boneWeightsByteBuffer = ByteBuffer.allocateDirect(vertexCount * 16);
         boneWeightsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
         int copiedWgt = nf.CopyBoneWeightsToBuffer(model, boneWeightsByteBuffer, vertexCount);
@@ -215,6 +261,29 @@ public class MMDModelGpuSkinning implements IMMDModel {
         FloatBuffer boneWeightsBuffer = boneWeightsByteBuffer.asFloatBuffer();
         GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, boneWgtVbo);
         GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, boneWeightsBuffer, GL46C.GL_STATIC_DRAW);
+        
+        // 顶点颜色缓冲区（Minecraft 标准属性：白色 + 全不透明）
+        ByteBuffer colorBuffer = ByteBuffer.allocateDirect(vertexCount * 16);
+        colorBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        
+        // UV1 缓冲区（overlay）— 静态数据，创建时即上传到 GPU
+        ByteBuffer uv1Buffer = ByteBuffer.allocateDirect(vertexCount * 8);
+        uv1Buffer.order(ByteOrder.LITTLE_ENDIAN);
+        for (int i = 0; i < vertexCount; i++) {
+            uv1Buffer.putInt(15);
+            uv1Buffer.putInt(15);
+        }
+        uv1Buffer.flip();
+        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv1Vbo);
+        GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, uv1Buffer, GL46C.GL_STATIC_DRAW);
+        
+        // UV2 缓冲区（lightmap）
+        ByteBuffer uv2Buffer = ByteBuffer.allocateDirect(vertexCount * 8);
+        uv2Buffer.order(ByteOrder.LITTLE_ENDIAN);
+        
+        // Color 缓冲区——初始分配 GPU 存储（避免 Iris 模式下缓冲区为空）
+        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorVbo);
+        GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, vertexCount * 16, GL46C.GL_DYNAMIC_DRAW);
         
         // 材质
         Material[] mats = new Material[(int) nf.GetMaterialCount(model)];
@@ -230,17 +299,46 @@ public class MMDModelGpuSkinning implements IMMDModel {
             }
         }
         
-        // 骨骼矩阵缓冲区和预分配的复制缓冲区
+        // lightMap 材质
+        Material lightMapMaterial = new Material();
+        MMDTextureManager.Texture mgrTex = MMDTextureManager.GetTexture(modelDir + "/lightMap.png");
+        if (mgrTex != null) {
+            lightMapMaterial.tex = mgrTex.tex;
+            lightMapMaterial.hasAlpha = mgrTex.hasAlpha;
+        } else {
+            lightMapMaterial.tex = GL46C.glGenTextures();
+            lightMapMaterial.ownsTexture = true;
+            GL46C.glBindTexture(GL46C.GL_TEXTURE_2D, lightMapMaterial.tex);
+            ByteBuffer texBuffer = ByteBuffer.allocateDirect(16 * 16 * 4);
+            texBuffer.order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = 0; i < 16 * 16; i++) {
+                texBuffer.put((byte) 255);
+                texBuffer.put((byte) 255);
+                texBuffer.put((byte) 255);
+                texBuffer.put((byte) 255);
+            }
+            texBuffer.flip();
+            GL46C.glTexImage2D(GL46C.GL_TEXTURE_2D, 0, GL46C.GL_RGBA, 16, 16, 0, GL46C.GL_RGBA, GL46C.GL_UNSIGNED_BYTE, texBuffer);
+            GL46C.glTexParameteri(GL46C.GL_TEXTURE_2D, GL46C.GL_TEXTURE_MAX_LEVEL, 0);
+            GL46C.glTexParameteri(GL46C.GL_TEXTURE_2D, GL46C.GL_TEXTURE_MIN_FILTER, GL46C.GL_LINEAR);
+            GL46C.glTexParameteri(GL46C.GL_TEXTURE_2D, GL46C.GL_TEXTURE_MAG_FILTER, GL46C.GL_LINEAR);
+            GL46C.glBindTexture(GL46C.GL_TEXTURE_2D, 0);
+            lightMapMaterial.hasAlpha = true;
+        }
+        
+        // 骨骼矩阵缓冲区
         FloatBuffer boneMatricesBuffer = MemoryUtil.memAllocFloat(boneCount * 16);
         ByteBuffer boneMatricesByteBuffer = ByteBuffer.allocateDirect(boneCount * 64);
         boneMatricesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        
+        // 创建 Compute Shader 输出缓冲区（每实例独立，双重用途：SSBO + VBO）
+        int[] outputBuffers = SkinningComputeShader.createOutputBuffers(vertexCount);
         
         // 构建结果
         MMDModelGpuSkinning result = new MMDModelGpuSkinning();
         result.model = model;
         result.modelDir = modelDir;
         result.vertexCount = vertexCount;
-        result.boneCount = boneCount;
         result.vertexArrayObject = vao;
         result.indexBufferObject = indexVbo;
         result.positionBufferObject = posVbo;
@@ -248,16 +346,27 @@ public class MMDModelGpuSkinning implements IMMDModel {
         result.uv0BufferObject = uv0Vbo;
         result.boneIndicesBufferObject = boneIdxVbo;
         result.boneWeightsBufferObject = boneWgtVbo;
+        result.colorBufferObject = colorVbo;
+        result.uv1BufferObject = uv1Vbo;
+        result.uv2BufferObject = uv2Vbo;
+        result.skinnedPositionsBuffer = outputBuffers[0];
+        result.skinnedNormalsBuffer = outputBuffers[1];
         result.posBuffer = posBuffer;
         result.norBuffer = norBuffer;
         result.uv0Buffer = uv0Buffer;
+        result.colorBuffer = colorBuffer;
+        result.uv1Buffer = uv1Buffer;
+        result.uv2Buffer = uv2Buffer;
         result.boneMatricesBuffer = boneMatricesBuffer;
         result.boneMatricesByteBuffer = boneMatricesByteBuffer;
         result.indexElementSize = indexElementSize;
         result.indexType = indexType;
         result.mats = mats;
+        result.lightMapMaterial = lightMapMaterial;
         result.modelViewMatBuff = MemoryUtil.memAllocFloat(16);
         result.projMatBuff = MemoryUtil.memAllocFloat(16);
+        result.light0Buff = MemoryUtil.memAllocFloat(3);
+        result.light1Buff = MemoryUtil.memAllocFloat(3);
         result.initialized = true;
         
         // 初始化 Morph 数据
@@ -266,13 +375,19 @@ public class MMDModelGpuSkinning implements IMMDModel {
         result.vertexMorphCount = morphCount;
         if (morphCount > 0) {
             result.morphWeightsBuffer = MemoryUtil.memAllocFloat(morphCount);
+            result.morphWeightsByteBuffer = ByteBuffer.allocateDirect(morphCount * 4);
+            result.morphWeightsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+            int[] morphBuffers = SkinningComputeShader.createMorphBuffers(morphCount);
+            result.morphOffsetsSSBO = morphBuffers[0];
+            result.morphWeightsSSBO = morphBuffers[1];
             logger.info("GPU Morph 初始化: {} 个顶点 Morph", morphCount);
         }
         
         // 启用自动眨眼
         nf.SetAutoBlinkEnabled(model, true);
         
-        logger.info("GPU 蒸皮模型创建成功: {} 顶点, {} 骨骼", vertexCount, boneCount);
+        GL46C.glBindVertexArray(0);
+        logger.info("GPU 蒙皮模型创建成功（Compute Shader）: {} 顶点, {} 骨骼", vertexCount, boneCount);
         return result;
     }
     
@@ -335,31 +450,28 @@ public class MMDModelGpuSkinning implements IMMDModel {
     
     private void RenderModel(Entity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, PoseStack deliverStack, RenderContext context) {
         Minecraft MCinstance = Minecraft.getInstance();
-        
-        // Iris 兼容：开始 GPU 蒙皮渲染
-        // 如果 Iris 激活，会绑定 Iris 的 G-buffer framebuffer 并设置正确的渲染阶段
-        IrisCompat.beginGpuSkinningWithIris();
-        
-        try {
-            renderModelInternal(entityIn, entityYaw, entityPitch, entityTrans, deliverStack, MCinstance, context);
-        } finally {
-            // Iris 兼容：结束 GPU 蒙皮渲染
-            // 恢复 framebuffer、着色器程序、SSBO 绑定等状态
-            IrisCompat.endGpuSkinningWithIris();
-        }
+        renderModelInternal(entityIn, entityYaw, entityPitch, entityTrans, deliverStack, MCinstance, context);
     }
     
     private void renderModelInternal(Entity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, PoseStack deliverStack, Minecraft MCinstance, RenderContext context) {
         // 光照计算
         MCinstance.level.updateSkyBrightness();
-        int blockLight = entityIn.level().getBrightness(LightLayer.BLOCK, entityIn.blockPosition());
-        int skyLight = entityIn.level().getBrightness(LightLayer.SKY, entityIn.blockPosition());
+        int eyeHeight = (int)(entityIn.getEyeY() - entityIn.getBlockY());
+        int blockLight = entityIn.level().getBrightness(LightLayer.BLOCK, entityIn.blockPosition().above(eyeHeight));
+        int skyLight = entityIn.level().getBrightness(LightLayer.SKY, entityIn.blockPosition().above(eyeHeight));
         float skyDarken = MCinstance.level.getSkyDarken();
         
         float blockLightFactor = blockLight / 15.0f;
         float skyLightFactor = (skyLight / 15.0f) * ((15.0f - skyDarken) / 15.0f);
         float lightIntensity = Math.max(blockLightFactor, skyLightFactor);
         lightIntensity = 0.1f + lightIntensity * 0.9f;
+        
+        light0Direction = new Vector3f(1.0f, 0.75f, 0.0f);
+        light1Direction = new Vector3f(-1.0f, 0.75f, 0.0f);
+        light0Direction.normalize();
+        light1Direction.normalize();
+        light0Direction.rotate(new Quaternionf().rotateY(entityYaw * ((float) Math.PI / 180F)));
+        light1Direction.rotate(new Quaternionf().rotateY(entityYaw * ((float) Math.PI / 180F)));
         
         // 变换
         deliverStack.mulPose(new Quaternionf().rotateY(-entityYaw * ((float) Math.PI / 180F)));
@@ -391,21 +503,31 @@ public class MMDModelGpuSkinning implements IMMDModel {
             }
         }
         
-        // 检查是否启用 Toon 渲染（ToonConfig 直接代理 ConfigManager，无需手动同步）
+        uploadBoneMatrices();
+        if (vertexMorphCount > 0) {
+            uploadMorphData();
+        }
+        
+        // Compute Shader 蒙皮
+        computeShader.dispatch(
+            positionBufferObject, normalBufferObject,
+            boneIndicesBufferObject, boneWeightsBufferObject,
+            skinnedPositionsBuffer, skinnedNormalsBuffer,
+            morphOffsetsSSBO, morphWeightsSSBO,
+            vertexCount, vertexMorphCount
+        );
+        
+        // 检查是否启用 Toon 渲染
         boolean useToon = ConfigManager.isToonRenderingEnabled();
         if (useToon) {
-            // 初始化 Toon 着色器（懒加载）
-            if (toonShader == null) {
-                toonShader = new ToonShader();
-                if (!toonShader.init()) {
-                    logger.warn("Toon 着色器初始化失败，回退到普通着色");
+            if (toonShaderCpu == null) {
+                toonShaderCpu = new ToonShaderCpu();
+                if (!toonShaderCpu.init()) {
+                    logger.warn("ToonShaderCpu 初始化失败，回退到普通着色");
                     useToon = false;
                 }
             }
         }
-        
-        // 上传骨骼矩阵到 GPU
-        uploadBoneMatrices();
         
         BufferUploader.reset();
         GL46C.glBindVertexArray(vertexArrayObject);
@@ -414,7 +536,6 @@ public class MMDModelGpuSkinning implements IMMDModel {
         RenderSystem.blendEquation(GL46C.GL_FUNC_ADD);
         RenderSystem.blendFunc(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA);
         
-        // 设置矩阵（两种模式共用）
         modelViewMatBuff.clear();
         projMatBuff.clear();
         deliverStack.last().pose().get(modelViewMatBuff);
@@ -422,151 +543,185 @@ public class MMDModelGpuSkinning implements IMMDModel {
         
         GL46C.glBindBuffer(GL46C.GL_ELEMENT_ARRAY_BUFFER, indexBufferObject);
         
-        if (useToon && toonShader != null && toonShader.isInitialized()) {
-            // ==================== Toon 渲染模式 ====================
-            renderToon(MCinstance, lightIntensity);
+        currentDeliverStack = deliverStack;
+        if (useToon && toonShaderCpu != null && toonShaderCpu.isInitialized()) {
+            renderToon(MCinstance, lightIntensity, blockLight, skyLight, skyDarken);
         } else {
-            // ==================== 普通渲染模式 ====================
-            renderNormal(MCinstance, lightIntensity);
+            renderNormal(MCinstance, lightIntensity, blockLight, skyLight, skyDarken);
         }
         
-        // === 清理顶点属性 ===
+        // === 清理 ===
         cleanupVertexAttributes();
         
-        // 注意：主要的状态恢复由 IrisCompat.endGpuSkinningRendering() 处理
-        // 这里只做基本的解绑，避免重复操作
+        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, 0);
+        GL46C.glBindBuffer(GL46C.GL_ELEMENT_ARRAY_BUFFER, 0);
+        GL46C.glBindVertexArray(0);
+        RenderSystem.activeTexture(GL46C.GL_TEXTURE0);
+        
+        RenderSystem.getShader().clear();
+        BufferUploader.reset();
     }
     
     /**
      * 清理所有启用的顶点属性数组
      */
     private void cleanupVertexAttributes() {
-        // 普通着色器属性
-        if (gpuShader != null) {
-            int posLoc = gpuShader.getPositionLocation();
-            int norLoc = gpuShader.getNormalLocation();
-            int uvLoc = gpuShader.getUv0Location();
-            int boneIdxLoc = gpuShader.getBoneIndicesLocation();
-            int boneWgtLoc = gpuShader.getBoneWeightsLocation();
-            
-            if (posLoc != -1) GL46C.glDisableVertexAttribArray(posLoc);
-            if (norLoc != -1) GL46C.glDisableVertexAttribArray(norLoc);
-            if (uvLoc != -1) GL46C.glDisableVertexAttribArray(uvLoc);
-            if (boneIdxLoc != -1) GL46C.glDisableVertexAttribArray(boneIdxLoc);
-            if (boneWgtLoc != -1) GL46C.glDisableVertexAttribArray(boneWgtLoc);
-        }
-        
-        // Toon 着色器属性
-        if (toonShader != null && toonShader.isInitialized()) {
-            // 主着色器
-            int posLoc = toonShader.getPositionLocation();
-            int norLoc = toonShader.getNormalLocation();
-            int uvLoc = toonShader.getUv0Location();
-            int boneIdxLoc = toonShader.getBoneIndicesLocation();
-            int boneWgtLoc = toonShader.getBoneWeightsLocation();
-            
-            if (posLoc != -1) GL46C.glDisableVertexAttribArray(posLoc);
-            if (norLoc != -1) GL46C.glDisableVertexAttribArray(norLoc);
-            if (uvLoc != -1) GL46C.glDisableVertexAttribArray(uvLoc);
-            if (boneIdxLoc != -1) GL46C.glDisableVertexAttribArray(boneIdxLoc);
-            if (boneWgtLoc != -1) GL46C.glDisableVertexAttribArray(boneWgtLoc);
-            
-            // 描边着色器
-            int outPosLoc = toonShader.getOutlinePositionLocation();
-            int outNorLoc = toonShader.getOutlineNormalLocation();
-            int outBoneIdxLoc = toonShader.getOutlineBoneIndicesLocation();
-            int outBoneWgtLoc = toonShader.getOutlineBoneWeightsLocation();
-            
-            if (outPosLoc != -1) GL46C.glDisableVertexAttribArray(outPosLoc);
-            if (outNorLoc != -1) GL46C.glDisableVertexAttribArray(outNorLoc);
-            if (outBoneIdxLoc != -1) GL46C.glDisableVertexAttribArray(outBoneIdxLoc);
-            if (outBoneWgtLoc != -1) GL46C.glDisableVertexAttribArray(outBoneWgtLoc);
-        }
+        if (positionLocation != -1) GL46C.glDisableVertexAttribArray(positionLocation);
+        if (normalLocation != -1) GL46C.glDisableVertexAttribArray(normalLocation);
+        if (uv0Location != -1) GL46C.glDisableVertexAttribArray(uv0Location);
+        if (uv1Location != -1) GL46C.glDisableVertexAttribArray(uv1Location);
+        if (uv2Location != -1) GL46C.glDisableVertexAttribArray(uv2Location);
+        if (colorLocation != -1) GL46C.glDisableVertexAttribArray(colorLocation);
+        if (I_positionLocation != -1) GL46C.glDisableVertexAttribArray(I_positionLocation);
+        if (I_normalLocation != -1) GL46C.glDisableVertexAttribArray(I_normalLocation);
+        if (I_uv0Location != -1) GL46C.glDisableVertexAttribArray(I_uv0Location);
+        if (I_uv2Location != -1) GL46C.glDisableVertexAttribArray(I_uv2Location);
+        if (I_colorLocation != -1) GL46C.glDisableVertexAttribArray(I_colorLocation);
     }
     
     /**
-     * 普通渲染模式（GPU 蒙皮）
+     * 普通渲染模式（通过 Minecraft 标准 ShaderInstance 管线）
+     * 
+     * 使用 RenderSystem.getShader() 获取当前着色器，
+     * 当 Iris 激活时返回的是 Iris 的 G-buffer 着色器，从而正确写入 MRT。
      */
-    private void renderNormal(Minecraft MCinstance, float lightIntensity) {
-        gpuShader.use();
+    private void renderNormal(Minecraft MCinstance, float lightIntensity, int blockLight, int skyLight, float skyDarken) {
+        // 获取 Minecraft 当前着色器（Iris 激活时会被替换为 G-buffer 着色器）
+        ShaderInstance shader = RenderSystem.getShader();
+        if (shader == null) {
+            logger.error("[GPU蒙皮] RenderSystem.getShader() 返回 null，跳过渲染");
+            return;
+        }
+        shaderProgram = shader.getId();
+        setUniforms(shader, currentDeliverStack);
+        shader.apply();
         
-        int posLoc = gpuShader.getPositionLocation();
-        int norLoc = gpuShader.getNormalLocation();
-        int uvLoc = gpuShader.getUv0Location();
-        int boneIdxLoc = gpuShader.getBoneIndicesLocation();
-        int boneWgtLoc = gpuShader.getBoneWeightsLocation();
+        GL46C.glUseProgram(shaderProgram);
+        updateLocation(shaderProgram);
         
-        setupVertexAttributes(posLoc, norLoc, uvLoc, boneIdxLoc, boneWgtLoc);
+        // 上传动态数据到 GPU 缓冲区
         
-        gpuShader.setModelViewMatrix(modelViewMatBuff);
-        gpuShader.setProjectionMatrix(projMatBuff);
-        gpuShader.setSampler0(0);
-        gpuShader.setLightIntensity(lightIntensity);
-        gpuShader.uploadBoneMatrices(boneMatricesBuffer, boneCount);
+        // UV2（lightmap）— 每帧更新
+        int blockBrightness = 16 * blockLight;
+        int skyBrightness = Math.round((15.0f - skyDarken) * (skyLight / 15.0f) * 16);
+        uv2Buffer.clear();
+        for (int i = 0; i < vertexCount; i++) {
+            uv2Buffer.putInt(blockBrightness);
+            uv2Buffer.putInt(skyBrightness);
+        }
+        uv2Buffer.flip();
+        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
+        GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, uv2Buffer, GL46C.GL_DYNAMIC_DRAW);
         
-        // Morph 支持
-        if (vertexMorphCount > 0) {
-            uploadMorphData();
-            gpuShader.bindMorphSSBOs();
-            gpuShader.setMorphParams(vertexMorphCount, vertexCount);
-        } else {
-            gpuShader.setMorphParams(0, 0);
+        // Color（应用光照强度）— 每帧更新
+        colorBuffer.clear();
+        for (int i = 0; i < vertexCount; i++) {
+            colorBuffer.putFloat(lightIntensity);
+            colorBuffer.putFloat(lightIntensity);
+            colorBuffer.putFloat(lightIntensity);
+            colorBuffer.putFloat(1.0f);
+        }
+        colorBuffer.flip();
+        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
+        GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, colorBuffer, GL46C.GL_DYNAMIC_DRAW);
+        
+        // 绑定顶点属性（标准名称）
+        if (positionLocation != -1) {
+            GL46C.glEnableVertexAttribArray(positionLocation);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedPositionsBuffer);
+            GL46C.glVertexAttribPointer(positionLocation, 3, GL46C.GL_FLOAT, false, 0, 0);
+        }
+        if (normalLocation != -1) {
+            GL46C.glEnableVertexAttribArray(normalLocation);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedNormalsBuffer);
+            GL46C.glVertexAttribPointer(normalLocation, 3, GL46C.GL_FLOAT, false, 0, 0);
+        }
+        if (uv0Location != -1) {
+            GL46C.glEnableVertexAttribArray(uv0Location);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv0BufferObject);
+            GL46C.glVertexAttribPointer(uv0Location, 2, GL46C.GL_FLOAT, false, 0, 0);
+        }
+        if (uv2Location != -1) {
+            GL46C.glEnableVertexAttribArray(uv2Location);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
+            GL46C.glVertexAttribIPointer(uv2Location, 2, GL46C.GL_INT, 0, 0);
+        }
+        if (uv1Location != -1) {
+            GL46C.glEnableVertexAttribArray(uv1Location);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv1BufferObject);
+            GL46C.glVertexAttribIPointer(uv1Location, 2, GL46C.GL_INT, 0, 0);
+        }
+        if (colorLocation != -1) {
+            GL46C.glEnableVertexAttribArray(colorLocation);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
+            GL46C.glVertexAttribPointer(colorLocation, 4, GL46C.GL_FLOAT, false, 0, 0);
+        }
+        
+        // 绑定 Iris 重命名属性
+        if (I_positionLocation != -1) {
+            GL46C.glEnableVertexAttribArray(I_positionLocation);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedPositionsBuffer);
+            GL46C.glVertexAttribPointer(I_positionLocation, 3, GL46C.GL_FLOAT, false, 0, 0);
+        }
+        if (I_normalLocation != -1) {
+            GL46C.glEnableVertexAttribArray(I_normalLocation);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedNormalsBuffer);
+            GL46C.glVertexAttribPointer(I_normalLocation, 3, GL46C.GL_FLOAT, false, 0, 0);
+        }
+        if (I_uv0Location != -1) {
+            GL46C.glEnableVertexAttribArray(I_uv0Location);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv0BufferObject);
+            GL46C.glVertexAttribPointer(I_uv0Location, 2, GL46C.GL_FLOAT, false, 0, 0);
+        }
+        if (I_uv2Location != -1) {
+            GL46C.glEnableVertexAttribArray(I_uv2Location);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
+            GL46C.glVertexAttribIPointer(I_uv2Location, 2, GL46C.GL_INT, 0, 0);
+        }
+        if (I_colorLocation != -1) {
+            GL46C.glEnableVertexAttribArray(I_colorLocation);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
+            GL46C.glVertexAttribPointer(I_colorLocation, 4, GL46C.GL_FLOAT, false, 0, 0);
         }
         
         drawAllSubMeshes(MCinstance);
     }
     
     /**
-     * Toon 渲染模式（3渲2/卡通着色）
-     * 两遍渲染：1. 描边（背面扩张）2. 主体（卡通着色）
+     * Toon 渲染模式（使用 ToonShaderCpu，蒙皮后的顶点数据来自 Compute Shader）
      */
-    private void renderToon(Minecraft MCinstance, float lightIntensity) {
+    private void renderToon(Minecraft MCinstance, float lightIntensity, int blockLight, int skyLight, float skyDarken) {
+        
         // ===== 第一遍：描边 =====
         if (toonConfig.isOutlineEnabled()) {
-            toonShader.useOutline();
-            toonShader.uploadBoneMatrices(boneMatricesBuffer, boneCount);
+            toonShaderCpu.useOutline();
             
-            int posLoc = toonShader.getOutlinePositionLocation();
-            int norLoc = toonShader.getOutlineNormalLocation();
-            int boneIdxLoc = toonShader.getOutlineBoneIndicesLocation();
-            int boneWgtLoc = toonShader.getOutlineBoneWeightsLocation();
+            int posLoc = toonShaderCpu.getOutlinePositionLocation();
+            int norLoc = toonShaderCpu.getOutlineNormalLocation();
             
-            // 设置顶点属性（描边不需要 UV）
             if (posLoc != -1) {
                 GL46C.glEnableVertexAttribArray(posLoc);
-                GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, positionBufferObject);
+                GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedPositionsBuffer);
                 GL46C.glVertexAttribPointer(posLoc, 3, GL46C.GL_FLOAT, false, 0, 0);
             }
             if (norLoc != -1) {
                 GL46C.glEnableVertexAttribArray(norLoc);
-                GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, normalBufferObject);
+                GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedNormalsBuffer);
                 GL46C.glVertexAttribPointer(norLoc, 3, GL46C.GL_FLOAT, false, 0, 0);
             }
-            if (boneIdxLoc != -1) {
-                GL46C.glEnableVertexAttribArray(boneIdxLoc);
-                GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, boneIndicesBufferObject);
-                GL46C.glVertexAttribIPointer(boneIdxLoc, 4, GL46C.GL_INT, 0, 0);
-            }
-            if (boneWgtLoc != -1) {
-                GL46C.glEnableVertexAttribArray(boneWgtLoc);
-                GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, boneWeightsBufferObject);
-                GL46C.glVertexAttribPointer(boneWgtLoc, 4, GL46C.GL_FLOAT, false, 0, 0);
-            }
             
-            toonShader.setOutlineProjectionMatrix(projMatBuff);
-            toonShader.setOutlineModelViewMatrix(modelViewMatBuff);
-            toonShader.setOutlineWidth(toonConfig.getOutlineWidth());
-            toonShader.setOutlineColor(
+            toonShaderCpu.setOutlineProjectionMatrix(projMatBuff);
+            toonShaderCpu.setOutlineModelViewMatrix(modelViewMatBuff);
+            toonShaderCpu.setOutlineWidth(toonConfig.getOutlineWidth());
+            toonShaderCpu.setOutlineColor(
                 toonConfig.getOutlineColorR(),
                 toonConfig.getOutlineColorG(),
                 toonConfig.getOutlineColorB()
             );
             
-            // 正面剔除，只绘制背面（扩张后的背面形成描边）
             GL46C.glCullFace(GL46C.GL_FRONT);
             RenderSystem.enableCull();
             
-            // 绘制所有子网格
             long subMeshCount = nf.GetSubMeshCount(model);
             for (long i = 0; i < subMeshCount; ++i) {
                 int materialID = nf.GetSubMeshMaterialID(model, i);
@@ -578,60 +733,27 @@ public class MMDModelGpuSkinning implements IMMDModel {
                 GL46C.glDrawElements(GL46C.GL_TRIANGLES, count, indexType, startPos);
             }
             
-            // 恢复背面剔除
             GL46C.glCullFace(GL46C.GL_BACK);
+            
+            if (posLoc != -1) GL46C.glDisableVertexAttribArray(posLoc);
+            if (norLoc != -1) GL46C.glDisableVertexAttribArray(norLoc);
         }
         
         // ===== 第二遍：主体（Toon 着色） =====
-        toonShader.useMain();
-        toonShader.uploadBoneMatrices(boneMatricesBuffer, boneCount);
+        toonShaderCpu.useMain();
         
-        // Morph 支持
-        // 注意：SSBO 绑定点是全局的，gpuShader 的 SSBO 绑定在 toonShader 中也有效
-        if (vertexMorphCount > 0) {
-            uploadMorphData();
-            gpuShader.bindMorphSSBOs(); // 绑定点 1 和 2，ToonShader 共用
-            toonShader.setMorphParams(vertexMorphCount, vertexCount);
-        } else {
-            toonShader.setMorphParams(0, 0);
-        }
+        int posLoc = toonShaderCpu.getPositionLocation();
+        int norLoc = toonShaderCpu.getNormalLocation();
+        int uvLoc = toonShaderCpu.getUv0Location();
         
-        int posLoc = toonShader.getPositionLocation();
-        int norLoc = toonShader.getNormalLocation();
-        int uvLoc = toonShader.getUv0Location();
-        int boneIdxLoc = toonShader.getBoneIndicesLocation();
-        int boneWgtLoc = toonShader.getBoneWeightsLocation();
-        
-        setupVertexAttributes(posLoc, norLoc, uvLoc, boneIdxLoc, boneWgtLoc);
-        
-        toonShader.setProjectionMatrix(projMatBuff);
-        toonShader.setModelViewMatrix(modelViewMatBuff);
-        toonShader.setSampler0(0);
-        toonShader.setLightIntensity(lightIntensity);
-        toonShader.setToonLevels(toonConfig.getToonLevels());
-        toonShader.setRimLight(toonConfig.getRimPower(), toonConfig.getRimIntensity());
-        toonShader.setShadowColor(
-            toonConfig.getShadowColorR(),
-            toonConfig.getShadowColorG(),
-            toonConfig.getShadowColorB()
-        );
-        toonShader.setSpecular(toonConfig.getSpecularPower(), toonConfig.getSpecularIntensity());
-        
-        drawAllSubMeshes(MCinstance);
-    }
-    
-    /**
-     * 设置顶点属性
-     */
-    private void setupVertexAttributes(int posLoc, int norLoc, int uvLoc, int boneIdxLoc, int boneWgtLoc) {
         if (posLoc != -1) {
             GL46C.glEnableVertexAttribArray(posLoc);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, positionBufferObject);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedPositionsBuffer);
             GL46C.glVertexAttribPointer(posLoc, 3, GL46C.GL_FLOAT, false, 0, 0);
         }
         if (norLoc != -1) {
             GL46C.glEnableVertexAttribArray(norLoc);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, normalBufferObject);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedNormalsBuffer);
             GL46C.glVertexAttribPointer(norLoc, 3, GL46C.GL_FLOAT, false, 0, 0);
         }
         if (uvLoc != -1) {
@@ -639,16 +761,27 @@ public class MMDModelGpuSkinning implements IMMDModel {
             GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv0BufferObject);
             GL46C.glVertexAttribPointer(uvLoc, 2, GL46C.GL_FLOAT, false, 0, 0);
         }
-        if (boneIdxLoc != -1) {
-            GL46C.glEnableVertexAttribArray(boneIdxLoc);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, boneIndicesBufferObject);
-            GL46C.glVertexAttribIPointer(boneIdxLoc, 4, GL46C.GL_INT, 0, 0);
-        }
-        if (boneWgtLoc != -1) {
-            GL46C.glEnableVertexAttribArray(boneWgtLoc);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, boneWeightsBufferObject);
-            GL46C.glVertexAttribPointer(boneWgtLoc, 4, GL46C.GL_FLOAT, false, 0, 0);
-        }
+        
+        toonShaderCpu.setProjectionMatrix(projMatBuff);
+        toonShaderCpu.setModelViewMatrix(modelViewMatBuff);
+        toonShaderCpu.setSampler0(0);
+        toonShaderCpu.setLightIntensity(lightIntensity);
+        toonShaderCpu.setToonLevels(toonConfig.getToonLevels());
+        toonShaderCpu.setRimLight(toonConfig.getRimPower(), toonConfig.getRimIntensity());
+        toonShaderCpu.setShadowColor(
+            toonConfig.getShadowColorR(),
+            toonConfig.getShadowColorG(),
+            toonConfig.getShadowColorB()
+        );
+        toonShaderCpu.setSpecular(toonConfig.getSpecularPower(), toonConfig.getSpecularIntensity());
+        
+        drawAllSubMeshes(MCinstance);
+        
+        if (posLoc != -1) GL46C.glDisableVertexAttribArray(posLoc);
+        if (norLoc != -1) GL46C.glDisableVertexAttribArray(norLoc);
+        if (uvLoc != -1) GL46C.glDisableVertexAttribArray(uvLoc);
+        
+        GL46C.glUseProgram(0);
     }
     
     /**
@@ -684,8 +817,10 @@ public class MMDModelGpuSkinning implements IMMDModel {
         }
     }
     
+    /**
+     * 上传骨骼矩阵到 Compute Shader 的 SSBO
+     */
     private void uploadBoneMatrices() {
-        // 使用预分配的缓冲区（优化：避免每帧 allocateDirect）
         boneMatricesByteBuffer.clear();
         
         int copiedBones = nf.CopySkinningMatricesToBuffer(model, boneMatricesByteBuffer);
@@ -699,11 +834,11 @@ public class MMDModelGpuSkinning implements IMMDModel {
         }
         boneMatricesBuffer.flip();
         
-        gpuShader.uploadBoneMatrices(boneMatricesBuffer, copiedBones);
+        computeShader.uploadBoneMatrices(boneMatricesBuffer, copiedBones);
     }
     
     /**
-     * 上传 Morph 数据到 GPU
+     * 上传 Morph 数据到 Compute Shader 的 SSBO
      */
     private void uploadMorphData() {
         if (vertexMorphCount <= 0) return;
@@ -715,21 +850,92 @@ public class MMDModelGpuSkinning implements IMMDModel {
                 ByteBuffer offsetsBuffer = ByteBuffer.allocateDirect((int) offsetsSize);
                 offsetsBuffer.order(ByteOrder.LITTLE_ENDIAN);
                 nf.CopyGpuMorphOffsetsToBuffer(model, offsetsBuffer);
-                gpuShader.uploadMorphOffsets(offsetsBuffer, vertexMorphCount, vertexCount);
+                computeShader.uploadMorphOffsets(morphOffsetsSSBO, offsetsBuffer);
                 morphDataUploaded = true;
             }
         }
         
-        // 每帧更新权重
-        if (morphWeightsBuffer != null) {
-            ByteBuffer weightsByteBuffer = ByteBuffer.allocateDirect(vertexMorphCount * 4);
-            weightsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-            nf.CopyGpuMorphWeightsToBuffer(model, weightsByteBuffer);
+        // 每帧更新权重（复用预分配缓冲区）
+        if (morphWeightsBuffer != null && morphWeightsByteBuffer != null) {
+            morphWeightsByteBuffer.clear();
+            nf.CopyGpuMorphWeightsToBuffer(model, morphWeightsByteBuffer);
             morphWeightsBuffer.clear();
-            morphWeightsBuffer.put(weightsByteBuffer.asFloatBuffer());
+            morphWeightsByteBuffer.position(0);
+            morphWeightsBuffer.put(morphWeightsByteBuffer.asFloatBuffer());
             morphWeightsBuffer.flip();
-            gpuShader.updateMorphWeights(morphWeightsBuffer);
+            computeShader.updateMorphWeights(morphWeightsSSBO, morphWeightsBuffer);
         }
+    }
+    
+    /**
+     * 更新着色器属性位置（基于当前绑定的着色器程序）
+     * 支持 Minecraft 标准属性和 Iris 重命名属性
+     */
+    private void updateLocation(int program) {
+        positionLocation = GlStateManager._glGetAttribLocation(program, "Position");
+        normalLocation = GlStateManager._glGetAttribLocation(program, "Normal");
+        uv0Location = GlStateManager._glGetAttribLocation(program, "UV0");
+        uv1Location = GlStateManager._glGetAttribLocation(program, "UV1");
+        uv2Location = GlStateManager._glGetAttribLocation(program, "UV2");
+        colorLocation = GlStateManager._glGetAttribLocation(program, "Color");
+        
+        // Iris 重命名属性（Iris 会将标准属性名加上 "iris_" 前缀）
+        I_positionLocation = GlStateManager._glGetAttribLocation(program, "iris_Position");
+        I_normalLocation = GlStateManager._glGetAttribLocation(program, "iris_Normal");
+        I_uv0Location = GlStateManager._glGetAttribLocation(program, "iris_UV0");
+        I_uv2Location = GlStateManager._glGetAttribLocation(program, "iris_UV2");
+        I_colorLocation = GlStateManager._glGetAttribLocation(program, "iris_Color");
+    }
+    
+    /**
+     * 设置 Minecraft ShaderInstance 的标准 Uniform（模型视图矩阵、投影矩阵、光照等）
+     */
+    private void setUniforms(ShaderInstance shader, PoseStack deliverStack) {
+        if (shader.MODEL_VIEW_MATRIX != null)
+            shader.MODEL_VIEW_MATRIX.set(deliverStack.last().pose());
+        
+        if (shader.PROJECTION_MATRIX != null)
+            shader.PROJECTION_MATRIX.set(RenderSystem.getProjectionMatrix());
+        
+        if (shader.INVERSE_VIEW_ROTATION_MATRIX != null)
+            shader.INVERSE_VIEW_ROTATION_MATRIX.set(RenderSystem.getInverseViewRotationMatrix());
+        
+        if (shader.COLOR_MODULATOR != null)
+            shader.COLOR_MODULATOR.set(RenderSystem.getShaderColor());
+        
+        if (shader.LIGHT0_DIRECTION != null)
+            shader.LIGHT0_DIRECTION.set(light0Direction);
+        
+        if (shader.LIGHT1_DIRECTION != null)
+            shader.LIGHT1_DIRECTION.set(light1Direction);
+        
+        if (shader.FOG_START != null)
+            shader.FOG_START.set(RenderSystem.getShaderFogStart());
+        
+        if (shader.FOG_END != null)
+            shader.FOG_END.set(RenderSystem.getShaderFogEnd());
+        
+        if (shader.FOG_COLOR != null)
+            shader.FOG_COLOR.set(RenderSystem.getShaderFogColor());
+        
+        if (shader.FOG_SHAPE != null)
+            shader.FOG_SHAPE.set(RenderSystem.getShaderFogShape().getIndex());
+        
+        if (shader.TEXTURE_MATRIX != null)
+            shader.TEXTURE_MATRIX.set(RenderSystem.getTextureMatrix());
+        
+        if (shader.GAME_TIME != null)
+            shader.GAME_TIME.set(RenderSystem.getShaderGameTime());
+        
+        if (shader.SCREEN_SIZE != null) {
+            Window window = Minecraft.getInstance().getWindow();
+            shader.SCREEN_SIZE.set((float) window.getScreenWidth(), (float) window.getScreenHeight());
+        }
+        if (shader.LINE_WIDTH != null)
+            shader.LINE_WIDTH.set(RenderSystem.getShaderLineWidth());
+        
+        shader.setSampler("Sampler1", lightMapMaterial.tex);
+        shader.setSampler("Sampler2", lightMapMaterial.tex);
     }
     
     @Override
@@ -769,15 +975,28 @@ public class MMDModelGpuSkinning implements IMMDModel {
         GL46C.glDeleteBuffers(uv0BufferObject);
         GL46C.glDeleteBuffers(boneIndicesBufferObject);
         GL46C.glDeleteBuffers(boneWeightsBufferObject);
+        GL46C.glDeleteBuffers(colorBufferObject);
+        GL46C.glDeleteBuffers(uv1BufferObject);
+        GL46C.glDeleteBuffers(uv2BufferObject);
+        GL46C.glDeleteBuffers(skinnedPositionsBuffer);
+        GL46C.glDeleteBuffers(skinnedNormalsBuffer);
+        
+        // 释放 Morph SSBO（每实例独立）
+        if (morphOffsetsSSBO > 0) GL46C.glDeleteBuffers(morphOffsetsSSBO);
+        if (morphWeightsSSBO > 0) GL46C.glDeleteBuffers(morphWeightsSSBO);
+        
+        // 释放自建的 lightMap 纹理（来自 MMDTextureManager 的不在此删除）
+        if (lightMapMaterial != null && lightMapMaterial.ownsTexture && lightMapMaterial.tex > 0) {
+            GL46C.glDeleteTextures(lightMapMaterial.tex);
+        }
         
         // 释放 MemoryUtil 分配的缓冲区
         if (boneMatricesBuffer != null) MemoryUtil.memFree(boneMatricesBuffer);
+        if (morphWeightsBuffer != null) MemoryUtil.memFree(morphWeightsBuffer);
         if (modelViewMatBuff != null) MemoryUtil.memFree(modelViewMatBuff);
         if (projMatBuff != null) MemoryUtil.memFree(projMatBuff);
-        
-        // 注意：posBuffer, norBuffer, uv0Buffer, boneMatricesByteBuffer 是通过
-        // ByteBuffer.allocateDirect() 分配的，会由 GC 自动回收
-        // boneIndicesBuffer, boneWeightsBuffer 是 ByteBuffer 的视图，不需要单独释放
+        if (light0Buff != null) MemoryUtil.memFree(light0Buff);
+        if (light1Buff != null) MemoryUtil.memFree(light1Buff);
     }
     
     /** @deprecated 使用 {@link #dispose()} 替代 */
@@ -788,7 +1007,8 @@ public class MMDModelGpuSkinning implements IMMDModel {
     
     private static class Material {
         int tex = 0;
-        @SuppressWarnings("unused") // 预留用于透明度渲染
+        @SuppressWarnings("unused")
         boolean hasAlpha = false;
+        boolean ownsTexture = false;
     }
 }
