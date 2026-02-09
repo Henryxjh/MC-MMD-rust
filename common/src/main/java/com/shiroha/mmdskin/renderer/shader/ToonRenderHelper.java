@@ -143,13 +143,13 @@ public class ToonRenderHelper {
                 RenderSystem.enableCull();
             }
             
-            // 绑定纹理
+            // 绑定纹理（setShaderTexture 更新 Iris TextureTracker，glBindTexture 做实际 GL 绑定）
             int texId = materialProvider.getTextureId(materialID);
             if (texId == 0) {
-                mc.getEntityRenderDispatcher().textureManager.bindForSetup(TextureManager.INTENTIONAL_MISSING_TEXTURE);
-            } else {
-                GL46C.glBindTexture(GL46C.GL_TEXTURE_2D, texId);
+                texId = mc.getTextureManager().getTexture(TextureManager.INTENTIONAL_MISSING_TEXTURE).getId();
             }
+            RenderSystem.setShaderTexture(0, texId);
+            GL46C.glBindTexture(GL46C.GL_TEXTURE_2D, texId);
             
             long startPos = (long) nf.GetSubMeshBeginIndex(model, i) * indexElementSize;
             int count = nf.GetSubMeshVertexCount(model, i);

@@ -11,6 +11,8 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 
 /**
@@ -22,6 +24,22 @@ import net.neoforged.neoforge.common.NeoForge;
  */
 @EventBusSubscriber(value = Dist.CLIENT, bus = EventBusSubscriber.Bus.MOD, modid = MmdSkin.MOD_ID)
 public class MmdSkinNeoForgeClient {
+    /**
+     * MOD 事件：注册按键映射（在 FMLClientSetupEvent 之前触发）
+     */
+    @SubscribeEvent
+    public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
+        MmdSkinRegisterClient.onRegisterKeyMappings(event);
+    }
+    
+    /**
+     * MOD 事件：注册实体渲染器（在 FMLClientSetupEvent 之前触发）
+     */
+    @SubscribeEvent
+    public static void onRegisterEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        MmdSkinRegisterClient.onRegisterEntityRenderers(event);
+    }
+    
     @SubscribeEvent
     public static void clientSetup(FMLClientSetupEvent event) {
         MmdSkinClient.logger.info("MMD Skin NeoForge 客户端初始化开始...");

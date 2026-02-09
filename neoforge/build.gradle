@@ -131,7 +131,8 @@ dependencies {
     shadowCommon(project(path: ":common", configuration: "transformProductionNeoForge")) { transitive false }
 
     // JLayer - MP3 解码器（舞台模式音频播放，shadow 打包进 JAR）
-    implementation("javazoom:jlayer:1.0.1")
+    // 必须使用 common 配置（流入 developmentNeoForge），否则 NeoForge ModuleClassLoader 找不到
+    common("javazoom:jlayer:1.0.1")
     shadowCommon("javazoom:jlayer:1.0.1")
 
     // NeoForge 平台

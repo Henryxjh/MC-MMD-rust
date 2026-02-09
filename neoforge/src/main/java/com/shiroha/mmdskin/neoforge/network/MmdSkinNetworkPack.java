@@ -101,11 +101,10 @@ public record MmdSkinNetworkPack(int opCode, UUID playerUUID, String animId, int
         
         if (mc.level == null) return;
         Player target = mc.level.getPlayerByUUID(playerUUID);
-        if (target == null) return;
-            
+
         switch (opCode) {
-            case 1 -> MmdSkinRendererPlayerHelper.CustomAnim(target, animId);
-            case 2 -> MmdSkinRendererPlayerHelper.ResetPhysics(target);
+            case 1 -> { if (target != null) MmdSkinRendererPlayerHelper.CustomAnim(target, animId); }
+            case 2 -> { if (target != null) MmdSkinRendererPlayerHelper.ResetPhysics(target); }
             case 3 -> PlayerModelSyncManager.onRemotePlayerModelReceived(playerUUID, animId);
             case 4 -> {
                 Entity maidEntity = mc.level.getEntity(arg0);

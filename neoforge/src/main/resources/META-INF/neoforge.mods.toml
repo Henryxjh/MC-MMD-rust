@@ -31,3 +31,6 @@ type = "required"
 versionRange = "*"
 ordering = "NONE"
 side = "CLIENT"
+
+[[mixins]]
+config = "mmdskin-neoforge.mixins.json"

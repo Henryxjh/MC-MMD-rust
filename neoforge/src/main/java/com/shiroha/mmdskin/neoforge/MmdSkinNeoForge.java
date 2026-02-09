@@ -16,6 +16,7 @@ public class MmdSkinNeoForge {
 
     public MmdSkinNeoForge(IEventBus modEventBus) {
         modEventBus.addListener(this::preInit);
+        modEventBus.addListener(MmdSkinRegisterCommon::onRegisterPayloadHandlers);
     }
 
     public void preInit(FMLCommonSetupEvent event) {

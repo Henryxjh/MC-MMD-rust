@@ -1319,8 +1319,15 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_TextureHasAlpha(
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
-/// 矩阵存储
-static MATRICES: Lazy<Mutex<Vec<glam::Mat4>>> = Lazy::new(|| Mutex::new(Vec::new()));
+/// 矩阵存储（使用 HashMap + ID，避免 Vec 扩容导致指针失效）
+static MATRICES: Lazy<Mutex<std::collections::HashMap<i64, glam::Mat4>>> = Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// 矩阵 ID 计数器
+fn next_matrix_id() -> i64 {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static MAT_COUNTER: AtomicI64 = AtomicI64::new(1);
+    MAT_COUNTER.fetch_add(1, Ordering::SeqCst)
+}
 
 /// 创建矩阵
 #[no_mangle]
@@ -1328,11 +1335,10 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CreateMat(
     _env: JNIEnv,
     _class: JClass,
 ) -> jlong {
+    let id = next_matrix_id();
     let mut matrices = MATRICES.lock().unwrap();
-    matrices.push(glam::Mat4::IDENTITY);
-    // 返回矩阵在 Vec 中的指针
-    let idx = matrices.len() - 1;
-    matrices.as_ptr().wrapping_add(idx) as jlong
+    matrices.insert(id, glam::Mat4::IDENTITY);
+    id
 }
 
 /// 删除矩阵
@@ -1340,9 +1346,31 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CreateMat(
 pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_DeleteMat(
     _env: JNIEnv,
     _class: JClass,
-    _mat: jlong,
+    mat: jlong,
 ) {
-    // 简化实现：不实际删除，避免指针失效
+    let mut matrices = MATRICES.lock().unwrap();
+    matrices.remove(&mat);
+}
+
+/// 将矩阵数据复制到 ByteBuffer（64 字节 = 16 floats）
+#[no_mangle]
+pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyMatToBuffer(
+    env: JNIEnv,
+    _class: JClass,
+    mat: jlong,
+    buffer: JByteBuffer,
+) -> jboolean {
+    let matrices = MATRICES.lock().unwrap();
+    if let Some(m) = matrices.get(&mat) {
+        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
+            unsafe {
+                let src = m as *const glam::Mat4 as *const u8;
+                ptr::copy_nonoverlapping(src, dst, 64);
+            }
+            return 1;
+        }
+    }
+    0
 }
 
 /// 获取右手矩阵
@@ -1355,13 +1383,13 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetRightHandMat(
 ) {
     let models = MODELS.read().unwrap();
     if let Some(model_arc) = models.get(&model) {
-        let model = model_arc.lock().unwrap();
-        let hand_mat = model.get_right_hand_matrix();
-        unsafe {
-            let mat_ptr = mat as *mut glam::Mat4;
-            if !mat_ptr.is_null() {
-                *mat_ptr = hand_mat;
-            }
+        let model_guard = model_arc.lock().unwrap();
+        let hand_mat = model_guard.get_right_hand_matrix();
+        drop(model_guard);
+        drop(models);
+        let mut matrices = MATRICES.lock().unwrap();
+        if let Some(m) = matrices.get_mut(&mat) {
+            *m = hand_mat;
         }
     }
 }
@@ -1376,13 +1404,13 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetLeftHandMat(
 ) {
     let models = MODELS.read().unwrap();
     if let Some(model_arc) = models.get(&model) {
-        let model = model_arc.lock().unwrap();
-        let hand_mat = model.get_left_hand_matrix();
-        unsafe {
-            let mat_ptr = mat as *mut glam::Mat4;
-            if !mat_ptr.is_null() {
-                *mat_ptr = hand_mat;
-            }
+        let model_guard = model_arc.lock().unwrap();
+        let hand_mat = model_guard.get_left_hand_matrix();
+        drop(model_guard);
+        drop(models);
+        let mut matrices = MATRICES.lock().unwrap();
+        if let Some(m) = matrices.get_mut(&mat) {
+            *m = hand_mat;
         }
     }
 }
@@ -2494,6 +2522,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetPhysicsConfig(
     bust_angular_spring_stiffness_scale: jfloat,
     bust_linear_spring_damping_factor: jfloat,
     bust_angular_spring_damping_factor: jfloat,
+    bust_clamp_inward: jboolean,
     joints_enabled: jboolean,
     debug_log: jboolean,
 ) {
@@ -2524,6 +2553,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetPhysicsConfig(
         bust_angular_spring_stiffness_scale,
         bust_linear_spring_damping_factor,
         bust_angular_spring_damping_factor,
+        bust_clamp_inward: bust_clamp_inward != 0,
         joints_enabled: joints_enabled != 0,
         debug_log: debug_log != 0,
     };

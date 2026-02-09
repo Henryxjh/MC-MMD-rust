@@ -544,6 +544,8 @@ public class NativeFunc {
 
     public native void DeleteMat(long mat);
 
+    public native boolean CopyMatToBuffer(long mat, java.nio.ByteBuffer buffer);
+
     public native void GetRightHandMat(long model, long mat);
 
     public native void GetLeftHandMat(long model, long mat);
@@ -1100,6 +1102,7 @@ public class NativeFunc {
      * @param bustAngularSpringStiffnessScale 胸部角度弹簧刚度缩放
      * @param bustLinearSpringDampingFactor 胸部线性弹簧阻尼系数
      * @param bustAngularSpringDampingFactor 胸部角度弹簧阻尼系数
+     * @param bustClampInward 胸部防凹陷修正是否启用
      * @param jointsEnabled 是否启用关节
      * @param debugLog 是否输出调试日志
      */
@@ -1128,6 +1131,7 @@ public class NativeFunc {
         float bustAngularSpringStiffnessScale,
         float bustLinearSpringDampingFactor,
         float bustAngularSpringDampingFactor,
+        boolean bustClampInward,
         boolean jointsEnabled,
         boolean debugLog
     );

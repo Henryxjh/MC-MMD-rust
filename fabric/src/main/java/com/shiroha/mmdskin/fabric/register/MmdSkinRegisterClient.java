@@ -2,6 +2,7 @@ package com.shiroha.mmdskin.fabric.register;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import com.shiroha.mmdskin.fabric.config.ModConfigScreen;
+import com.shiroha.mmdskin.mixin.fabric.KeyMappingAccessor;
 import com.shiroha.mmdskin.fabric.maid.MaidCompatMixinPlugin;
 import com.shiroha.mmdskin.fabric.network.MmdSkinNetworkPack;
 import com.shiroha.mmdskin.maid.MaidActionNetworkHandler;
@@ -12,6 +13,7 @@ import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
 import com.shiroha.mmdskin.ui.network.MorphWheelNetworkHandler;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
+import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
 
 import java.io.File;
 import net.fabricmc.api.EnvType;
@@ -125,7 +127,7 @@ public class MmdSkinRegisterClient {
             if (MCinstance.screen == null || MCinstance.screen instanceof ConfigWheelScreen) {
                 boolean keyDown = keyConfigWheel.isDown();
                 if (keyDown && !configWheelKeyWasDown) {
-                    int keyCode = keyConfigWheel.getDefaultKey().getValue();
+                    int keyCode = ((KeyMappingAccessor) keyConfigWheel).mmd$getBoundKey().getValue();
                     MCinstance.setScreen(new ConfigWheelScreen(keyCode));
                 }
                 configWheelKeyWasDown = keyDown;
@@ -188,8 +190,9 @@ public class MmdSkinRegisterClient {
             });
         });
         
-        // 注册玩家断开连接事件（清理远程玩家缓存）
+        // 注册玩家断开连接事件（清理远程玩家缓存 + 舞台模式）
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            MMDCameraController.getInstance().exitStageMode();
             PlayerModelSyncManager.onDisconnect();
         });
         
@@ -211,7 +214,7 @@ public class MmdSkinRegisterClient {
         String className = target.getClass().getName();
         if (className.contains("EntityMaid") || className.contains("touhoulittlemaid")) {
             String maidName = target.getName().getString();
-            int keyCode = keyMaidConfigWheel.getDefaultKey().getValue();
+            int keyCode = ((KeyMappingAccessor) keyMaidConfigWheel).mmd$getBoundKey().getValue();
             mc.setScreen(new MaidConfigWheelScreen(target.getUUID(), target.getId(), maidName, keyCode));
             logger.info("打开女仆配置轮盘: {} (ID: {})", maidName, target.getId());
         }

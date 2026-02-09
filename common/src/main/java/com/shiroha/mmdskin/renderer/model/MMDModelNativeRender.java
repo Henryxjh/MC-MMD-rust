@@ -1,6 +1,7 @@
 package com.shiroha.mmdskin.renderer.model;
 
 import com.shiroha.mmdskin.NativeFunc;
+import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.EyeTrackingHelper;
 import com.shiroha.mmdskin.renderer.core.RenderContext;
@@ -75,7 +76,7 @@ public class MMDModelNativeRender implements IMMDModel {
     
     // 时间追踪
     private long lastUpdateTime = -1;
-    private static final float MAX_DELTA_TIME = 0.05f; // 最大 50ms，防止暂停后跳跃
+    private static final float MAX_DELTA_TIME = 0.25f; // 最大 250ms（4FPS），防止暂停后跳跃
     
     MMDModelNativeRender() {}
     
@@ -229,17 +230,22 @@ public class MMDModelNativeRender implements IMMDModel {
     }
     
     private void renderLivingEntity(LivingEntity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, float tickDelta, PoseStack poseStack, int packedLight, RenderContext context) {
-        // 头部角度处理
-        float headAngleX = Mth.clamp(entityIn.getXRot(), -50.0f, 50.0f);
-        float headAngleY = (entityYaw - Mth.lerp(tickDelta, entityIn.yHeadRotO, entityIn.yHeadRot)) % 360.0f;
-        if (headAngleY < -180.0f) headAngleY += 360.0f;
-        else if (headAngleY > 180.0f) headAngleY -= 360.0f;
-        headAngleY = Mth.clamp(headAngleY, -80.0f, 80.0f);
-        
-        float pitchRad = headAngleX * ((float) Math.PI / 180F);
-        float yawRad = context.isInventoryScene() ? -headAngleY * ((float) Math.PI / 180F) : headAngleY * ((float) Math.PI / 180F);
-        nf.SetHeadAngle(model, pitchRad, yawRad, 0.0f, context.isWorldScene());
-        
+        // 头部角度处理（舞台播放时归零，由 VMD 动画控制）
+        boolean stagePlaying = MMDCameraController.getInstance().isStagePlayingModel(model);
+        if (stagePlaying) {
+            nf.SetHeadAngle(model, 0.0f, 0.0f, 0.0f, context.isWorldScene());
+        } else {
+            float headAngleX = Mth.clamp(entityIn.getXRot(), -50.0f, 50.0f);
+            float headAngleY = (entityYaw - Mth.lerp(tickDelta, entityIn.yHeadRotO, entityIn.yHeadRot)) % 360.0f;
+            if (headAngleY < -180.0f) headAngleY += 360.0f;
+            else if (headAngleY > 180.0f) headAngleY -= 360.0f;
+            headAngleY = Mth.clamp(headAngleY, -80.0f, 80.0f);
+
+            float pitchRad = headAngleX * ((float) Math.PI / 180F);
+            float yawRad = context.isInventoryScene() ? -headAngleY * ((float) Math.PI / 180F) : headAngleY * ((float) Math.PI / 180F);
+            nf.SetHeadAngle(model, pitchRad, yawRad, 0.0f, context.isWorldScene());
+        }
+
         // 传递实体位置和朝向给物理系统（用于人物移动时的惯性效果）
         final float MODEL_SCALE = 0.09f;
         float posX = (float)(Mth.lerp(tickDelta, entityIn.xo, entityIn.getX()) * MODEL_SCALE);
@@ -248,7 +254,9 @@ public class MMDModelNativeRender implements IMMDModel {
         float bodyYaw = Mth.lerp(tickDelta, entityIn.yBodyRotO, entityIn.yBodyRot) * ((float) Math.PI / 180F);
         nf.SetModelPositionAndYaw(model, posX, posY, posZ, bodyYaw);
 
-        EyeTrackingHelper.updateEyeTracking(nf, model, entityIn, entityYaw, tickDelta, getModelName());
+        if (!stagePlaying) {
+            EyeTrackingHelper.updateEyeTracking(nf, model, entityIn, entityYaw, tickDelta, getModelName());
+        }
         
         Update();
         RenderModel(entityIn, entityYaw, entityPitch, entityTrans, poseStack, packedLight, context);
@@ -365,7 +373,7 @@ public class MMDModelNativeRender implements IMMDModel {
         if (mats[materialID].tex != 0) {
             RenderSystem.setShaderTexture(0, mats[materialID].tex);
         } else {
-            mc.getTextureManager().bindForSetup(TextureManager.INTENTIONAL_MISSING_TEXTURE);
+            RenderSystem.setShaderTexture(0, mc.getTextureManager().getTexture(TextureManager.INTENTIONAL_MISSING_TEXTURE).getId());
         }
         
         // === 关键：使用 Minecraft 原生着色器，Iris 会正确拦截 ===

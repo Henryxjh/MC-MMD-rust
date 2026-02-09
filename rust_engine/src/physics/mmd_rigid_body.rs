@@ -72,6 +72,11 @@ pub struct MMDRigidBody {
     pub friction: f32,
     /// 是否为胸部刚体（通过名称自动识别）
     pub is_bust: bool,
+    /// 是否为头发刚体（通过名称自动识别）
+    pub is_hair: bool,
+    /// 胸部刚体的"朝外"方向（骨骼本地空间），用于防凹陷检测
+    /// 方向：从骨骼中心指向刚体中心
+    pub bust_local_outward: Option<Vec3>,
 }
 
 impl MMDRigidBody {
@@ -124,6 +129,22 @@ impl MMDRigidBody {
         let initial_transform = mat4_to_isometry(rb_mat);
         
         let is_bust = is_bust_name(&pmx_rb.local_name);
+        let is_hair = is_hair_name(&pmx_rb.local_name);
+        
+        // 为胸部刚体计算"朝外"方向（骨骼本地空间）
+        // 方向：从骨骼中心指向刚体中心，用于后续防凹陷检测
+        let bust_local_outward = if is_bust {
+            // offset_matrix 的平移分量 = 刚体中心在骨骼本地空间的位置
+            let rb_in_bone_local = offset_matrix.w_axis.truncate();
+            let len = rb_in_bone_local.length();
+            if len > 0.001 {
+                Some(rb_in_bone_local / len)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         
         Self {
             name: pmx_rb.local_name.clone(),
@@ -143,6 +164,8 @@ impl MMDRigidBody {
             restitution: pmx_rb.repulsion,
             friction: pmx_rb.friction,
             is_bust,
+            is_hair,
+            bust_local_outward,
         }
     }
     
@@ -311,4 +334,20 @@ fn is_bust_name(name: &str) -> bool {
         || lower.contains("bust")
         || lower.contains("breast")
         || lower.contains("oppai")
+}
+
+/// 判断刚体名称是否为头发相关
+/// 
+/// MMD 模型中头发刚体常见命名：
+/// - 日文：髪、ヘア、ツイン、ポニーテール、前髪、後髪、横髪
+/// - 英文：hair、Hair、twin、pony、tail
+fn is_hair_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("髪")
+        || lower.contains("ヘア")
+        || lower.contains("hair")
+        || lower.contains("毛")
+        || lower.contains("ツイン")
+        || lower.contains("ポニー")
+        || lower.contains("テール")
 }

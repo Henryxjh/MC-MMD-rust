@@ -88,6 +88,12 @@ pub struct PhysicsConfig {
     /// 胸部角度弹簧阻尼系数，默认 1.0
     pub bust_angular_spring_damping_factor: f32,
 
+    // ========== 胸部防凹陷 ==========
+    /// 是否启用胸部防凹陷修正，默认 true
+    /// 开启后，胸部骨骼向身体内部旋转时会被钳位回动画姿态，
+    /// 但向外弹跳不受影响。
+    pub bust_clamp_inward: bool,
+
     // ========== 调试 ==========
     /// 是否启用关节，默认 true
     pub joints_enabled: bool,
@@ -190,10 +196,13 @@ impl Default for PhysicsConfig {
             bust_linear_damping_scale: 1.5,
             bust_angular_damping_scale: 1.5,
             bust_mass_scale: 1.0,
-            bust_linear_spring_stiffness_scale: 8.0,
-            bust_angular_spring_stiffness_scale: 8.0,
+            bust_linear_spring_stiffness_scale: 10.0,
+            bust_angular_spring_stiffness_scale: 10.0,
             bust_linear_spring_damping_factor: 3.0,
             bust_angular_spring_damping_factor: 3.0,
+
+            // ====== 胸部防凹陷 ======
+            bust_clamp_inward: true,
 
             // ====== 调试 ======
             // 是否启用关节约束

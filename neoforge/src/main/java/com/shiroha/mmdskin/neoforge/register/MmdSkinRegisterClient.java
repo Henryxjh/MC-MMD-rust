@@ -7,6 +7,7 @@ import com.shiroha.mmdskin.maid.MaidActionNetworkHandler;
 import com.shiroha.mmdskin.maid.MaidModelNetworkHandler;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRenderFactory;
 import com.shiroha.mmdskin.ui.network.ActionWheelNetworkHandler;
+import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
 import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
@@ -195,7 +196,7 @@ public class MmdSkinRegisterClient {
             if (mc.screen == null || mc.screen instanceof ConfigWheelScreen) {
                 boolean keyDown = keyConfigWheel.isDown();
                 if (keyDown && !configWheelKeyWasDown) {
-                    int keyCode = keyConfigWheel.getDefaultKey().getValue();
+                    int keyCode = keyConfigWheel.getKey().getValue();
                     mc.setScreen(new ConfigWheelScreen(keyCode));
                 }
                 configWheelKeyWasDown = keyDown;
@@ -230,7 +231,7 @@ public class MmdSkinRegisterClient {
             String className = target.getClass().getName();
             if (className.contains("EntityMaid") || className.contains("touhoulittlemaid")) {
                 String maidName = target.getName().getString();
-                int keyCode = keyMaidConfigWheel.getDefaultKey().getValue();
+                int keyCode = keyMaidConfigWheel.getKey().getValue();
                 mc.setScreen(new MaidConfigWheelScreen(target.getUUID(), target.getId(), maidName, keyCode));
                 logger.info("打开女仆配置轮盘: {} (ID: {})", maidName, target.getId());
             }
@@ -258,6 +259,7 @@ public class MmdSkinRegisterClient {
          */
         @SubscribeEvent
         public static void onPlayerLoggedOut(ClientPlayerNetworkEvent.LoggingOut event) {
+            MMDCameraController.getInstance().exitStageMode();
             PlayerModelSyncManager.onDisconnect();
         }
     }
