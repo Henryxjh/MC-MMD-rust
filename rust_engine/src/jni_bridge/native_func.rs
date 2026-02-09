@@ -2508,26 +2508,29 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetPhysicsConfig(
     angular_damping_scale: jfloat,
     mass_scale: jfloat,
     linear_spring_stiffness_scale: jfloat,
-    angular_spring_stiffness_scale: jfloat,
-    linear_spring_damping_factor: jfloat,
-    angular_spring_damping_factor: jfloat,
+    _angular_spring_stiffness_scale: jfloat,
+    _linear_spring_damping_factor: jfloat,
+    _angular_spring_damping_factor: jfloat,
     inertia_strength: jfloat,
     max_linear_velocity: jfloat,
     max_angular_velocity: jfloat,
-    bust_physics_enabled: jboolean,
-    bust_linear_damping_scale: jfloat,
-    bust_angular_damping_scale: jfloat,
-    bust_mass_scale: jfloat,
-    bust_linear_spring_stiffness_scale: jfloat,
-    bust_angular_spring_stiffness_scale: jfloat,
-    bust_linear_spring_damping_factor: jfloat,
-    bust_angular_spring_damping_factor: jfloat,
-    bust_clamp_inward: jboolean,
+    _bust_physics_enabled: jboolean,
+    _bust_linear_damping_scale: jfloat,
+    _bust_angular_damping_scale: jfloat,
+    _bust_mass_scale: jfloat,
+    _bust_linear_spring_stiffness_scale: jfloat,
+    _bust_angular_spring_stiffness_scale: jfloat,
+    _bust_linear_spring_damping_factor: jfloat,
+    _bust_angular_spring_damping_factor: jfloat,
+    _bust_clamp_inward: jboolean,
     joints_enabled: jboolean,
     debug_log: jboolean,
 ) {
     use crate::physics::config::{PhysicsConfig, set_config};
     
+    // 旧参数映射：
+    // - linear_spring_stiffness_scale → spring_stiffness_scale
+    // - 其他弹簧/胸部参数均已废弃（胸部现在使用统一的 6DOF 弹簧系统）
     let config = PhysicsConfig {
         gravity_y,
         physics_fps,
@@ -2538,22 +2541,10 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetPhysicsConfig(
         linear_damping_scale,
         angular_damping_scale,
         mass_scale,
-        linear_spring_stiffness_scale,
-        angular_spring_stiffness_scale,
-        linear_spring_damping_factor,
-        angular_spring_damping_factor,
+        spring_stiffness_scale: linear_spring_stiffness_scale,
         inertia_strength,
         max_linear_velocity,
         max_angular_velocity,
-        bust_physics_enabled: bust_physics_enabled != 0,
-        bust_linear_damping_scale,
-        bust_angular_damping_scale,
-        bust_mass_scale,
-        bust_linear_spring_stiffness_scale,
-        bust_angular_spring_stiffness_scale,
-        bust_linear_spring_damping_factor,
-        bust_angular_spring_damping_factor,
-        bust_clamp_inward: bust_clamp_inward != 0,
         joints_enabled: joints_enabled != 0,
         debug_log: debug_log != 0,
     };
@@ -2561,10 +2552,9 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetPhysicsConfig(
     set_config(config);
     
     if debug_log != 0 {
-        log::info!("[物理配置] 已更新: 重力={}, FPS={}, 阻尼={}/{}, 刚度={}/{}, 胸部启用={}", 
+        log::info!("[物理配置] 已更新: 重力={}, FPS={}, 阻尼={}/{}, 弹簧缩放={}", 
             gravity_y, physics_fps, 
             linear_damping_scale, angular_damping_scale,
-            linear_spring_stiffness_scale, angular_spring_stiffness_scale,
-            bust_physics_enabled != 0);
+            linear_spring_stiffness_scale);
     }
 }
