@@ -122,15 +122,13 @@ public class MmdSkinNetworkPack {
      */
     public void DoInClient() {
         Minecraft MCinstance = Minecraft.getInstance();
+        if (MCinstance.player == null) return;
         // 忽略自己发送的消息
-        assert MCinstance.player != null;
         if (playerUUID.equals(MCinstance.player.getUUID()))
             return;
             
-        assert MCinstance.level != null;
+        if (MCinstance.level == null) return;
         Player target = MCinstance.level.getPlayerByUUID(playerUUID);
-        if (target == null)
-            return;
             
         switch (opCode) {
             case 1: {

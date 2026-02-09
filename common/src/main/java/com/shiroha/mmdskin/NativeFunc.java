@@ -22,9 +22,13 @@ public class NativeFunc {
     private static final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("windows");
     private static final boolean isMacOS = System.getProperty("os.name").toLowerCase().contains("mac");
     private static final boolean isArm64;
+    private static final boolean isLoongArch64;
+    private static final boolean isRiscv64;
     static {
         String arch = System.getProperty("os.arch").toLowerCase();
         isArm64 = arch.contains("aarch64") || arch.contains("arm64");
+        isLoongArch64 = arch.contains("loongarch64") || arch.contains("loong64");
+        isRiscv64 = arch.contains("riscv64");
         // Android 检测（FCL/PojavLauncher 等启动器使用标准 JVM）
         boolean androidDetected = false;
         String[] launcherEnvKeys = { "FCL_NATIVEDIR", "POJAV_NATIVEDIR", "MOD_ANDROID_RUNTIME", "FCL_VERSION_CODE" };
@@ -381,7 +385,16 @@ public class NativeFunc {
             fileName = "libmmd_engine.dylib";
             downloadFileName = "libmmd_engine-" + archDir + ".dylib";
         } else if (isLinux) {
-            String archDir = isArm64 ? "linux-arm64" : "linux-x64";
+            String archDir;
+                if (isArm64) {
+                    archDir = "linux-arm64";
+                } else if (isLoongArch64) {
+                    archDir = "linux-loongarch64";
+                } else if (isRiscv64) {
+                    archDir = "linux-riscv64";
+                } else {
+                    archDir = "linux-x64";
+                }
             logger.info("Linux Env Detected! Arch: " + archDir);
             resourcePath = "/natives/" + archDir + "/libmmd_engine.so";
             fileName = "libmmd_engine.so";
@@ -548,6 +561,50 @@ public class NativeFunc {
     public native long LoadAnimation(long model, String filename);
 
     public native void DeleteAnimation(long anim);
+    
+    /**
+     * 查询动画是否包含相机数据
+     * @param anim 动画句柄
+     * @return 是否包含相机数据
+     */
+    public native boolean HasCameraData(long anim);
+    
+    /**
+     * 获取动画最大帧数（包含相机轨道）
+     * @param anim 动画句柄
+     * @return 最大帧数
+     */
+    public native float GetAnimMaxFrame(long anim);
+    
+    /**
+     * 获取相机变换数据，写入 ByteBuffer (32 字节)
+     * 布局: pos_x, pos_y, pos_z (3×f32) + rot_x, rot_y, rot_z (3×f32) + fov (f32) + is_perspective (i32)
+     * @param anim 动画句柄
+     * @param frame 浮点帧数
+     * @param buffer 目标 DirectByteBuffer (至少 32 字节)
+     */
+    public native void GetCameraTransform(long anim, float frame, ByteBuffer buffer);
+    
+    /**
+     * 查询动画是否包含骨骼关键帧
+     * @param anim 动画句柄
+     * @return 是否包含骨骼数据
+     */
+    public native boolean HasBoneData(long anim);
+    
+    /**
+     * 查询动画是否包含表情关键帧
+     * @param anim 动画句柄
+     * @return 是否包含表情数据
+     */
+    public native boolean HasMorphData(long anim);
+    
+    /**
+     * 将 source 动画的骨骼和 Morph 数据合并到 target 动画中
+     * @param target 目标动画句柄（将被修改）
+     * @param source 源动画句柄（只读）
+     */
+    public native void MergeAnimation(long target, long source);
 
     public native void SetHeadAngle(long model, float x, float y, float z, boolean flag);
     
@@ -954,6 +1011,65 @@ public class NativeFunc {
      */
     public native void SetMorphWeight(long model, int index, float weight);
     
+    // ========== GPU UV Morph 相关 ==========
+    
+    /**
+     * 初始化 GPU UV Morph 数据
+     * 将稀疏的 UV Morph 偏移转换为密集格式，供 GPU Compute Shader 使用
+     * @param model 模型句柄
+     */
+    public native void InitGpuUvMorphData(long model);
+    
+    /**
+     * 获取 UV Morph 数量
+     * @param model 模型句柄
+     * @return UV Morph 数量
+     */
+    public native int GetUvMorphCount(long model);
+    
+    /**
+     * 获取 GPU UV Morph 偏移数据大小（字节）
+     * @param model 模型句柄
+     * @return 数据大小
+     */
+    public native long GetGpuUvMorphOffsetsSize(long model);
+    
+    /**
+     * 复制 GPU UV Morph 偏移数据到 ByteBuffer
+     * @param model 模型句柄
+     * @param buffer 目标缓冲区
+     * @return 复制的字节数
+     */
+    public native long CopyGpuUvMorphOffsetsToBuffer(long model, java.nio.ByteBuffer buffer);
+    
+    /**
+     * 复制 GPU UV Morph 权重数据到 ByteBuffer
+     * @param model 模型句柄
+     * @param buffer 目标缓冲区
+     * @return 复制的 Morph 数量
+     */
+    public native int CopyGpuUvMorphWeightsToBuffer(long model, java.nio.ByteBuffer buffer);
+    
+    // ========== 材质 Morph 结果相关 ==========
+    
+    /**
+     * 获取材质 Morph 结果数量（等于材质数量）
+     * @param model 模型句柄
+     * @return 材质数量
+     */
+    public native int GetMaterialMorphResultCount(long model);
+    
+    /**
+     * 复制材质 Morph 结果到 ByteBuffer
+     * 每个材质 28 个 float: diffuse(4) + specular(3) + specular_strength(1) +
+     * ambient(3) + edge_color(4) + edge_size(1) + texture_tint(4) +
+     * environment_tint(4) + toon_tint(4)
+     * @param model 模型句柄
+     * @param buffer 目标缓冲区（需要 materialCount * 28 * 4 字节）
+     * @return 材质数量
+     */
+    public native int CopyMaterialMorphResultsToBuffer(long model, java.nio.ByteBuffer buffer);
+    
     // ========== 物理配置相关 ==========
     
     /**
@@ -974,6 +1090,14 @@ public class NativeFunc {
      * @param inertiaStrength 惯性效果强度
      * @param maxLinearVelocity 最大线速度
      * @param maxAngularVelocity 最大角速度
+     * @param bustPhysicsEnabled 胸部物理是否启用
+     * @param bustLinearDampingScale 胸部线性阻尼缩放
+     * @param bustAngularDampingScale 胸部角速度阻尼缩放
+     * @param bustMassScale 胸部质量缩放
+     * @param bustLinearSpringStiffnessScale 胸部线性弹簧刚度缩放
+     * @param bustAngularSpringStiffnessScale 胸部角度弹簧刚度缩放
+     * @param bustLinearSpringDampingFactor 胸部线性弹簧阻尼系数
+     * @param bustAngularSpringDampingFactor 胸部角度弹簧阻尼系数
      * @param jointsEnabled 是否启用关节
      * @param debugLog 是否输出调试日志
      */
@@ -994,6 +1118,14 @@ public class NativeFunc {
         float inertiaStrength,
         float maxLinearVelocity,
         float maxAngularVelocity,
+        boolean bustPhysicsEnabled,
+        float bustLinearDampingScale,
+        float bustAngularDampingScale,
+        float bustMassScale,
+        float bustLinearSpringStiffnessScale,
+        float bustAngularSpringStiffnessScale,
+        float bustLinearSpringDampingFactor,
+        float bustAngularSpringDampingFactor,
         boolean jointsEnabled,
         boolean debugLog
     );

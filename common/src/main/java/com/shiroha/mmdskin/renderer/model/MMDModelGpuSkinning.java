@@ -2,6 +2,7 @@ package com.shiroha.mmdskin.renderer.model;
 
 import com.shiroha.mmdskin.NativeFunc;
 import com.shiroha.mmdskin.config.ConfigManager;
+import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
 import com.shiroha.mmdskin.renderer.core.EyeTrackingHelper;
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.IrisCompat;
@@ -90,9 +91,11 @@ public class MMDModelGpuSkinning implements IMMDModel {
     private ByteBuffer norBuffer;
     @SuppressWarnings("unused")
     private ByteBuffer uv0Buffer;
+    @SuppressWarnings("unused")
     private ByteBuffer colorBuffer;
     @SuppressWarnings("unused")
     private ByteBuffer uv1Buffer;
+    @SuppressWarnings("unused")
     private ByteBuffer uv2Buffer;
     private FloatBuffer boneMatricesBuffer;
     private FloatBuffer modelViewMatBuff;
@@ -101,14 +104,27 @@ public class MMDModelGpuSkinning implements IMMDModel {
     // 预分配的骨骼矩阵复制缓冲区（避免每帧 allocateDirect）
     private ByteBuffer boneMatricesByteBuffer;
     
-    // Morph 数据
+    // 顶点 Morph 数据
     private int vertexMorphCount = 0;
     private boolean morphDataUploaded = false;
     private FloatBuffer morphWeightsBuffer;
-    private ByteBuffer morphWeightsByteBuffer; // 预分配复用，避免每帧 allocateDirect
-    // Morph SSBO（每实例独立，避免多模型数据冲突）
+    private ByteBuffer morphWeightsByteBuffer;
     private int morphOffsetsSSBO = 0;
     private int morphWeightsSSBO = 0;
+    
+    // UV Morph 数据
+    private int uvMorphCount = 0;
+    private boolean uvMorphDataUploaded = false;
+    private FloatBuffer uvMorphWeightsBuffer;
+    private ByteBuffer uvMorphWeightsByteBuffer;
+    private int uvMorphOffsetsSSBO = 0;
+    private int uvMorphWeightsSSBO = 0;
+    private int skinnedUvBuffer = 0;
+    
+    // 材质 Morph 结果（每材质 28 个 float）
+    private FloatBuffer materialMorphResultsBuffer;
+    private ByteBuffer materialMorphResultsByteBuffer;
+    private int materialMorphResultCount = 0;
     
     private int indexElementSize;
     private int indexType;
@@ -134,7 +150,7 @@ public class MMDModelGpuSkinning implements IMMDModel {
     
     // 时间追踪
     private long lastUpdateTime = -1;
-    private static final float MAX_DELTA_TIME = 0.05f;
+    private static final float MAX_DELTA_TIME = 0.25f; // 最大 250ms（4FPS），防止暂停后跳跃
     
     private boolean initialized = false;
     
@@ -179,6 +195,11 @@ public class MMDModelGpuSkinning implements IMMDModel {
         FloatBuffer modelViewMatBuff = null;
         FloatBuffer projMatBuff = null;
         FloatBuffer morphWeightsBuffer = null;
+        int[] uvMorphBuffers = null;
+        FloatBuffer uvMorphWeightsBuf = null;
+        int skinnedUvBuf = 0;
+        FloatBuffer matMorphResultsBuf = null;
+        ByteBuffer matMorphResultsByteBuf = null;
         Material lightMapMaterial = null;
         
         try {
@@ -359,13 +380,35 @@ public class MMDModelGpuSkinning implements IMMDModel {
             modelViewMatBuff = MemoryUtil.memAllocFloat(16);
             projMatBuff = MemoryUtil.memAllocFloat(16);
             
-            // 初始化 Morph 数据
+            // 初始化顶点 Morph 数据
             nf.InitGpuMorphData(model);
             int morphCount = (int) nf.GetVertexMorphCount(model);
             if (morphCount > 0) {
                 morphWeightsBuffer = MemoryUtil.memAllocFloat(morphCount);
                 morphBuffers = SkinningComputeShader.createMorphBuffers(morphCount);
                 logger.info("GPU Morph 初始化: {} 个顶点 Morph", morphCount);
+            }
+            
+            // 初始化 UV Morph 数据
+            nf.InitGpuUvMorphData(model);
+            int uvMorphCnt = nf.GetUvMorphCount(model);
+            if (uvMorphCnt > 0) {
+                uvMorphWeightsBuf = MemoryUtil.memAllocFloat(uvMorphCnt);
+                uvMorphBuffers = SkinningComputeShader.createUvMorphBuffers(uvMorphCnt);
+                skinnedUvBuf = SkinningComputeShader.createSkinnedUvBuffer(vertexCount);
+                logger.info("GPU UV Morph 初始化: {} 个 UV Morph", uvMorphCnt);
+            } else {
+                // 即使没有 UV Morph，也创建蒙皮 UV 输出缓冲区用于 Compute Shader 写入
+                skinnedUvBuf = SkinningComputeShader.createSkinnedUvBuffer(vertexCount);
+            }
+            
+            // 初始化材质 Morph 结果缓冲区
+            int matMorphCount = nf.GetMaterialMorphResultCount(model);
+            if (matMorphCount > 0) {
+                int floatCount = matMorphCount * 28;
+                matMorphResultsBuf = MemoryUtil.memAllocFloat(floatCount);
+                matMorphResultsByteBuf = MemoryUtil.memAlloc(floatCount * 4);
+                matMorphResultsByteBuf.order(ByteOrder.LITTLE_ENDIAN);
             }
             
             // 构建结果
@@ -408,6 +451,20 @@ public class MMDModelGpuSkinning implements IMMDModel {
                 result.morphOffsetsSSBO = morphBuffers[0];
                 result.morphWeightsSSBO = morphBuffers[1];
             }
+            // UV Morph
+            result.uvMorphCount = uvMorphCnt;
+            result.skinnedUvBuffer = skinnedUvBuf;
+            if (uvMorphCnt > 0) {
+                result.uvMorphWeightsBuffer = uvMorphWeightsBuf;
+                result.uvMorphWeightsByteBuffer = ByteBuffer.allocateDirect(uvMorphCnt * 4);
+                result.uvMorphWeightsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+                result.uvMorphOffsetsSSBO = uvMorphBuffers[0];
+                result.uvMorphWeightsSSBO = uvMorphBuffers[1];
+            }
+            // 材质 Morph
+            result.materialMorphResultCount = matMorphCount;
+            result.materialMorphResultsBuffer = matMorphResultsBuf;
+            result.materialMorphResultsByteBuffer = matMorphResultsByteBuf;
             result.initialized = true;
             
             // 启用自动眨眼
@@ -444,6 +501,11 @@ public class MMDModelGpuSkinning implements IMMDModel {
                 GL46C.glDeleteBuffers(morphBuffers[0]);
                 GL46C.glDeleteBuffers(morphBuffers[1]);
             }
+            if (uvMorphBuffers != null) {
+                GL46C.glDeleteBuffers(uvMorphBuffers[0]);
+                GL46C.glDeleteBuffers(uvMorphBuffers[1]);
+            }
+            if (skinnedUvBuf > 0) GL46C.glDeleteBuffers(skinnedUvBuf);
             if (lightMapMaterial != null && lightMapMaterial.ownsTexture && lightMapMaterial.tex > 0) {
                 GL46C.glDeleteTextures(lightMapMaterial.tex);
             }
@@ -454,6 +516,9 @@ public class MMDModelGpuSkinning implements IMMDModel {
             if (modelViewMatBuff != null) MemoryUtil.memFree(modelViewMatBuff);
             if (projMatBuff != null) MemoryUtil.memFree(projMatBuff);
             if (morphWeightsBuffer != null) MemoryUtil.memFree(morphWeightsBuffer);
+            if (uvMorphWeightsBuf != null) MemoryUtil.memFree(uvMorphWeightsBuf);
+            if (matMorphResultsBuf != null) MemoryUtil.memFree(matMorphResultsBuf);
+            if (matMorphResultsByteBuf != null) MemoryUtil.memFree(matMorphResultsByteBuf);
             
             return null;
         }
@@ -472,19 +537,26 @@ public class MMDModelGpuSkinning implements IMMDModel {
     }
     
     private void renderLivingEntity(LivingEntity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, float tickDelta, PoseStack mat, int packedLight, RenderContext context) {
-        // 使用公共工具类计算头部角度
-        float headAngleX = Mth.clamp(entityIn.getXRot(), -50.0f, 50.0f);
-        float headAngleY = (entityYaw - Mth.lerp(tickDelta, entityIn.yHeadRotO, entityIn.yHeadRot)) % 360.0f;
-        if (headAngleY < -180.0f) headAngleY += 360.0f;
-        else if (headAngleY > 180.0f) headAngleY -= 360.0f;
-        headAngleY = Mth.clamp(headAngleY, -80.0f, 80.0f);
-        
-        float pitchRad = headAngleX * ((float) Math.PI / 180F);
-        float yawRad = context.isInventoryScene() ? -headAngleY * ((float) Math.PI / 180F) : headAngleY * ((float) Math.PI / 180F);
-        nf.SetHeadAngle(model, pitchRad, yawRad, 0.0f, context.isWorldScene());
+        // 头部角度处理（舞台播放时归零，由 VMD 动画控制）
+        boolean stagePlaying = MMDCameraController.getInstance().isStagePlayingModel(model);
+        if (stagePlaying) {
+            nf.SetHeadAngle(model, 0.0f, 0.0f, 0.0f, context.isWorldScene());
+        } else {
+            float headAngleX = Mth.clamp(entityIn.getXRot(), -50.0f, 50.0f);
+            float headAngleY = (entityYaw - Mth.lerp(tickDelta, entityIn.yHeadRotO, entityIn.yHeadRot)) % 360.0f;
+            if (headAngleY < -180.0f) headAngleY += 360.0f;
+            else if (headAngleY > 180.0f) headAngleY -= 360.0f;
+            headAngleY = Mth.clamp(headAngleY, -80.0f, 80.0f);
+            
+            float pitchRad = headAngleX * ((float) Math.PI / 180F);
+            float yawRad = context.isInventoryScene() ? -headAngleY * ((float) Math.PI / 180F) : headAngleY * ((float) Math.PI / 180F);
+            nf.SetHeadAngle(model, pitchRad, yawRad, 0.0f, context.isWorldScene());
+        }
         
         // 使用公共工具类更新眼球追踪（传递模型名称，使用每模型独立配置）
-        EyeTrackingHelper.updateEyeTracking(nf, model, entityIn, entityYaw, tickDelta, getModelName());
+        if (!stagePlaying) {
+            EyeTrackingHelper.updateEyeTracking(nf, model, entityIn, entityYaw, tickDelta, getModelName());
+        }
         
         // 传递实体位置和朝向给物理系统（用于人物移动时的惯性效果）
         // 位置用于计算速度差，朝向用于将世界速度转换到模型局部空间
@@ -558,15 +630,24 @@ public class MMDModelGpuSkinning implements IMMDModel {
         if (vertexMorphCount > 0) {
             uploadMorphData();
         }
+        if (uvMorphCount > 0) {
+            uploadUvMorphData();
+        }
+        if (materialMorphResultCount > 0) {
+            fetchMaterialMorphResults();
+        }
         
-        // Compute Shader 蒙皮
+        // Compute Shader 蒙皮（含 UV Morph）
         computeShader.dispatch(
             positionBufferObject, normalBufferObject,
             boneIndicesBufferObject, boneWeightsBufferObject,
             skinnedPositionsBuffer, skinnedNormalsBuffer,
             boneMatrixSSBO,
             morphOffsetsSSBO, morphWeightsSSBO,
-            vertexCount, vertexMorphCount
+            vertexCount, vertexMorphCount,
+            uv0BufferObject,
+            uvMorphOffsetsSSBO, uvMorphWeightsSSBO,
+            skinnedUvBuffer, uvMorphCount
         );
         
         boolean useToon = ConfigManager.isToonRenderingEnabled();
@@ -653,31 +734,13 @@ public class MMDModelGpuSkinning implements IMMDModel {
         GL46C.glUseProgram(shaderProgram);
         updateLocation(shaderProgram);
         
-        // 上传动态数据到 GPU 缓冲区
-        
-        // UV2（lightmap）— 每帧更新
+        // === UV2 和 Color：所有顶点值相同，使用常量顶点属性（避免逐顶点循环和缓冲区上传）===
         int blockBrightness = 16 * blockLight;
         int skyBrightness = Math.round((15.0f - skyDarken) * (skyLight / 15.0f) * 16);
-        uv2Buffer.clear();
-        for (int i = 0; i < vertexCount; i++) {
-            uv2Buffer.putInt(blockBrightness);
-            uv2Buffer.putInt(skyBrightness);
-        }
-        uv2Buffer.flip();
-        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
-        GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, uv2Buffer, GL46C.GL_DYNAMIC_DRAW);
-        
-        // Color（应用光照强度）— 每帧更新
-        colorBuffer.clear();
-        for (int i = 0; i < vertexCount; i++) {
-            colorBuffer.putFloat(lightIntensity);
-            colorBuffer.putFloat(lightIntensity);
-            colorBuffer.putFloat(lightIntensity);
-            colorBuffer.putFloat(1.0f);
-        }
-        colorBuffer.flip();
-        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
-        GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, colorBuffer, GL46C.GL_DYNAMIC_DRAW);
+        if (uv2Location != -1) GL46C.glVertexAttribI4i(uv2Location, blockBrightness, skyBrightness, 0, 0);
+        if (I_uv2Location != -1) GL46C.glVertexAttribI4i(I_uv2Location, blockBrightness, skyBrightness, 0, 0);
+        if (colorLocation != -1) GL46C.glVertexAttrib4f(colorLocation, lightIntensity, lightIntensity, lightIntensity, 1.0f);
+        if (I_colorLocation != -1) GL46C.glVertexAttrib4f(I_colorLocation, lightIntensity, lightIntensity, lightIntensity, 1.0f);
         
         // 绑定顶点属性（标准名称）
         if (positionLocation != -1) {
@@ -690,25 +753,17 @@ public class MMDModelGpuSkinning implements IMMDModel {
             GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedNormalsBuffer);
             GL46C.glVertexAttribPointer(normalLocation, 3, GL46C.GL_FLOAT, false, 0, 0);
         }
+        // UV0: 使用 Compute Shader 输出的蒙皮后 UV（含 UV Morph）
+        int activeUvBuffer = (skinnedUvBuffer > 0) ? skinnedUvBuffer : uv0BufferObject;
         if (uv0Location != -1) {
             GL46C.glEnableVertexAttribArray(uv0Location);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv0BufferObject);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, activeUvBuffer);
             GL46C.glVertexAttribPointer(uv0Location, 2, GL46C.GL_FLOAT, false, 0, 0);
-        }
-        if (uv2Location != -1) {
-            GL46C.glEnableVertexAttribArray(uv2Location);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
-            GL46C.glVertexAttribIPointer(uv2Location, 2, GL46C.GL_INT, 0, 0);
         }
         if (uv1Location != -1) {
             GL46C.glEnableVertexAttribArray(uv1Location);
             GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv1BufferObject);
             GL46C.glVertexAttribIPointer(uv1Location, 2, GL46C.GL_INT, 0, 0);
-        }
-        if (colorLocation != -1) {
-            GL46C.glEnableVertexAttribArray(colorLocation);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
-            GL46C.glVertexAttribPointer(colorLocation, 4, GL46C.GL_FLOAT, false, 0, 0);
         }
         
         // 绑定 Iris 重命名属性
@@ -724,18 +779,8 @@ public class MMDModelGpuSkinning implements IMMDModel {
         }
         if (I_uv0Location != -1) {
             GL46C.glEnableVertexAttribArray(I_uv0Location);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv0BufferObject);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, activeUvBuffer);
             GL46C.glVertexAttribPointer(I_uv0Location, 2, GL46C.GL_FLOAT, false, 0, 0);
-        }
-        if (I_uv2Location != -1) {
-            GL46C.glEnableVertexAttribArray(I_uv2Location);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
-            GL46C.glVertexAttribIPointer(I_uv2Location, 2, GL46C.GL_INT, 0, 0);
-        }
-        if (I_colorLocation != -1) {
-            GL46C.glEnableVertexAttribArray(I_colorLocation);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
-            GL46C.glVertexAttribPointer(I_colorLocation, 4, GL46C.GL_FLOAT, false, 0, 0);
         }
         
         drawAllSubMeshes(MCinstance);
@@ -791,19 +836,22 @@ public class MMDModelGpuSkinning implements IMMDModel {
             GL46C.glCullFace(GL46C.GL_FRONT);
             RenderSystem.enableCull();
             
+            // 绘制描边
             long subMeshCount = nf.GetSubMeshCount(model);
             for (long i = 0; i < subMeshCount; ++i) {
                 int materialID = nf.GetSubMeshMaterialID(model, i);
                 if (!nf.IsMaterialVisible(model, materialID)) continue;
-                if (nf.GetMaterialAlpha(model, materialID) == 0.0f) continue;
+                if (nf.GetMaterialAlpha(model, materialID) * getMaterialMorphAlpha(materialID) < 0.001f) continue;
                 
                 long startPos = (long) nf.GetSubMeshBeginIndex(model, i) * indexElementSize;
                 int count = nf.GetSubMeshVertexCount(model, i);
                 GL46C.glDrawElements(GL46C.GL_TRIANGLES, count, indexType, startPos);
             }
             
+            // 恢复背面剔除
             GL46C.glCullFace(GL46C.GL_BACK);
             
+            // 禁用描边着色器的顶点属性
             if (posLoc != -1) GL46C.glDisableVertexAttribArray(posLoc);
             if (norLoc != -1) GL46C.glDisableVertexAttribArray(norLoc);
         }
@@ -811,23 +859,24 @@ public class MMDModelGpuSkinning implements IMMDModel {
         // ===== 第二遍：主体（Toon 着色） =====
         toonShaderCpu.useMain();
         
-        int posLoc = toonShaderCpu.getPositionLocation();
-        int norLoc = toonShaderCpu.getNormalLocation();
+        int toonPosLoc = toonShaderCpu.getPositionLocation();
+        int toonNorLoc = toonShaderCpu.getNormalLocation();
         int uvLoc = toonShaderCpu.getUv0Location();
         
-        if (posLoc != -1) {
-            GL46C.glEnableVertexAttribArray(posLoc);
+        if (toonPosLoc != -1) {
+            GL46C.glEnableVertexAttribArray(toonPosLoc);
             GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedPositionsBuffer);
-            GL46C.glVertexAttribPointer(posLoc, 3, GL46C.GL_FLOAT, false, 0, 0);
+            GL46C.glVertexAttribPointer(toonPosLoc, 3, GL46C.GL_FLOAT, false, 0, 0);
         }
-        if (norLoc != -1) {
-            GL46C.glEnableVertexAttribArray(norLoc);
+        if (toonNorLoc != -1) {
+            GL46C.glEnableVertexAttribArray(toonNorLoc);
             GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, skinnedNormalsBuffer);
-            GL46C.glVertexAttribPointer(norLoc, 3, GL46C.GL_FLOAT, false, 0, 0);
+            GL46C.glVertexAttribPointer(toonNorLoc, 3, GL46C.GL_FLOAT, false, 0, 0);
         }
         if (uvLoc != -1) {
             GL46C.glEnableVertexAttribArray(uvLoc);
-            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv0BufferObject);
+            int toonUvBuffer = (skinnedUvBuffer > 0) ? skinnedUvBuffer : uv0BufferObject;
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, toonUvBuffer);
             GL46C.glVertexAttribPointer(uvLoc, 2, GL46C.GL_FLOAT, false, 0, 0);
         }
         
@@ -846,8 +895,8 @@ public class MMDModelGpuSkinning implements IMMDModel {
         
         drawAllSubMeshes(MCinstance);
         
-        if (posLoc != -1) GL46C.glDisableVertexAttribArray(posLoc);
-        if (norLoc != -1) GL46C.glDisableVertexAttribArray(norLoc);
+        if (toonPosLoc != -1) GL46C.glDisableVertexAttribArray(toonPosLoc);
+        if (toonNorLoc != -1) GL46C.glDisableVertexAttribArray(toonNorLoc);
         if (uvLoc != -1) GL46C.glDisableVertexAttribArray(uvLoc);
         
         GL46C.glUseProgram(0);
@@ -865,7 +914,9 @@ public class MMDModelGpuSkinning implements IMMDModel {
             if (!nf.IsMaterialVisible(model, materialID)) continue;
             
             float alpha = nf.GetMaterialAlpha(model, materialID);
-            if (alpha == 0.0f) continue;
+            // 应用材质 Morph 对 alpha 的调制
+            float morphAlpha = getMaterialMorphAlpha(materialID);
+            if (alpha * morphAlpha < 0.001f) continue;
             
             if (nf.GetMaterialBothFace(model, materialID)) {
                 RenderSystem.disableCull();
@@ -874,9 +925,9 @@ public class MMDModelGpuSkinning implements IMMDModel {
             }
             
             if (mats[materialID].tex == 0) {
-                MCinstance.getEntityRenderDispatcher().textureManager.bindForSetup(TextureManager.INTENTIONAL_MISSING_TEXTURE);
+                RenderSystem.setShaderTexture(0, MCinstance.getTextureManager().getTexture(TextureManager.INTENTIONAL_MISSING_TEXTURE).getId());
             } else {
-                GL46C.glBindTexture(GL46C.GL_TEXTURE_2D, mats[materialID].tex);
+                RenderSystem.setShaderTexture(0, mats[materialID].tex);
             }
             
             long startPos = (long) nf.GetSubMeshBeginIndex(model, i) * indexElementSize;
@@ -948,6 +999,68 @@ public class MMDModelGpuSkinning implements IMMDModel {
     }
     
     /**
+     * 上传 UV Morph 数据到 Compute Shader 的 SSBO
+     */
+    private void uploadUvMorphData() {
+        if (uvMorphCount <= 0) return;
+        
+        // 首次上传偏移数据（静态）
+        if (!uvMorphDataUploaded) {
+            long offsetsSize = nf.GetGpuUvMorphOffsetsSize(model);
+            if (offsetsSize > 0 && offsetsSize <= Integer.MAX_VALUE) {
+                ByteBuffer offsetsBuffer = MemoryUtil.memAlloc((int) offsetsSize);
+                offsetsBuffer.order(ByteOrder.LITTLE_ENDIAN);
+                try {
+                    nf.CopyGpuUvMorphOffsetsToBuffer(model, offsetsBuffer);
+                    computeShader.uploadUvMorphOffsets(uvMorphOffsetsSSBO, offsetsBuffer);
+                    uvMorphDataUploaded = true;
+                } finally {
+                    MemoryUtil.memFree(offsetsBuffer);
+                }
+            }
+        }
+        
+        // 每帧更新权重
+        if (uvMorphWeightsBuffer != null && uvMorphWeightsByteBuffer != null) {
+            uvMorphWeightsByteBuffer.clear();
+            nf.CopyGpuUvMorphWeightsToBuffer(model, uvMorphWeightsByteBuffer);
+            uvMorphWeightsBuffer.clear();
+            uvMorphWeightsByteBuffer.position(0);
+            uvMorphWeightsBuffer.put(uvMorphWeightsByteBuffer.asFloatBuffer());
+            uvMorphWeightsBuffer.flip();
+            computeShader.updateUvMorphWeights(uvMorphWeightsSSBO, uvMorphWeightsBuffer);
+        }
+    }
+    
+    /**
+     * 从 Rust 端获取材质 Morph 结果
+     */
+    private void fetchMaterialMorphResults() {
+        if (materialMorphResultCount <= 0 || materialMorphResultsBuffer == null) return;
+        
+        materialMorphResultsByteBuffer.clear();
+        nf.CopyMaterialMorphResultsToBuffer(model, materialMorphResultsByteBuffer);
+        materialMorphResultsBuffer.clear();
+        materialMorphResultsByteBuffer.position(0);
+        materialMorphResultsBuffer.put(materialMorphResultsByteBuffer.asFloatBuffer());
+        materialMorphResultsBuffer.flip();
+    }
+    
+    /**
+     * 获取指定材质的 Morph diffuse alpha 乘数
+     * 用于渲染时调制材质透明度
+     */
+    private float getMaterialMorphAlpha(int materialIndex) {
+        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return 1.0f;
+        // diffuse.w 位于每材质 28 float 块的第 3 个位置（index 3）
+        int offset = materialIndex * 28 + 3;
+        if (offset < materialMorphResultsBuffer.capacity()) {
+            return materialMorphResultsBuffer.get(offset);
+        }
+        return 1.0f;
+    }
+    
+    /**
      * 更新着色器属性位置（基于当前绑定的着色器程序）
      * 支持 Minecraft 标准属性和 Iris 重命名属性
      */
@@ -1016,6 +1129,11 @@ public class MMDModelGpuSkinning implements IMMDModel {
         
         shader.setSampler("Sampler1", lightMapMaterial.tex);
         shader.setSampler("Sampler2", lightMapMaterial.tex);
+        
+        // Iris 兼容：ExtendedShader.apply() 从 RenderSystem.getShaderTexture() 读取纹理，
+        // 而非 shader.setSampler() 设置的值，需要同步设置
+        RenderSystem.setShaderTexture(1, lightMapMaterial.tex);
+        RenderSystem.setShaderTexture(2, lightMapMaterial.tex);
     }
     
     @Override
@@ -1080,9 +1198,15 @@ public class MMDModelGpuSkinning implements IMMDModel {
         if (boneMatrixSSBO > 0) GL46C.glDeleteBuffers(boneMatrixSSBO);
         if (morphOffsetsSSBO > 0) GL46C.glDeleteBuffers(morphOffsetsSSBO);
         if (morphWeightsSSBO > 0) GL46C.glDeleteBuffers(morphWeightsSSBO);
+        if (uvMorphOffsetsSSBO > 0) GL46C.glDeleteBuffers(uvMorphOffsetsSSBO);
+        if (uvMorphWeightsSSBO > 0) GL46C.glDeleteBuffers(uvMorphWeightsSSBO);
+        if (skinnedUvBuffer > 0) GL46C.glDeleteBuffers(skinnedUvBuffer);
         boneMatrixSSBO = 0;
         morphOffsetsSSBO = 0;
         morphWeightsSSBO = 0;
+        uvMorphOffsetsSSBO = 0;
+        uvMorphWeightsSSBO = 0;
+        skinnedUvBuffer = 0;
         
         // 释放自建的 lightMap 纹理（来自 MMDTextureManager 的不在此删除）
         if (lightMapMaterial != null && lightMapMaterial.ownsTexture && lightMapMaterial.tex > 0) {
@@ -1102,6 +1226,18 @@ public class MMDModelGpuSkinning implements IMMDModel {
         if (morphWeightsBuffer != null) {
             MemoryUtil.memFree(morphWeightsBuffer);
             morphWeightsBuffer = null;
+        }
+        if (uvMorphWeightsBuffer != null) {
+            MemoryUtil.memFree(uvMorphWeightsBuffer);
+            uvMorphWeightsBuffer = null;
+        }
+        if (materialMorphResultsBuffer != null) {
+            MemoryUtil.memFree(materialMorphResultsBuffer);
+            materialMorphResultsBuffer = null;
+        }
+        if (materialMorphResultsByteBuffer != null) {
+            MemoryUtil.memFree(materialMorphResultsByteBuffer);
+            materialMorphResultsByteBuffer = null;
         }
         if (modelViewMatBuff != null) {
             MemoryUtil.memFree(modelViewMatBuff);

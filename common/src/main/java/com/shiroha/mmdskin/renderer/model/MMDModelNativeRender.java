@@ -3,6 +3,7 @@ package com.shiroha.mmdskin.renderer.model;
 import com.shiroha.mmdskin.NativeFunc;
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.EyeTrackingHelper;
+import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
 import com.shiroha.mmdskin.renderer.core.RenderContext;
 import com.shiroha.mmdskin.renderer.resource.MMDTextureManager;
 
@@ -25,6 +26,7 @@ import org.joml.Vector3f;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
 
 /**
  * 使用 Minecraft 原生渲染系统的 MMD 模型渲染器
@@ -60,14 +62,38 @@ public class MMDModelNativeRender implements IMMDModel {
     // 材质
     Material[] mats;
     
+    // 材质 Morph 结果
+    private FloatBuffer materialMorphResultsBuffer;
+    private ByteBuffer materialMorphResultsByteBuffer;
+    private int materialMorphResultCount = 0;
+    
     // 预分配临时对象（避免每帧分配）
     private final Quaternionf tempQuat = new Quaternionf();
     
     // 时间追踪
     private long lastUpdateTime = -1;
-    private static final float MAX_DELTA_TIME = 0.05f; // 最大 50ms，防止暂停后跳跃
+    private static final float MAX_DELTA_TIME = 0.25f; // 最大 250ms（4FPS），防止暂停后跳跃
     
     MMDModelNativeRender() {}
+    
+    private void fetchMaterialMorphResults() {
+        if (materialMorphResultCount <= 0 || materialMorphResultsBuffer == null) return;
+        materialMorphResultsByteBuffer.clear();
+        nf.CopyMaterialMorphResultsToBuffer(model, materialMorphResultsByteBuffer);
+        materialMorphResultsBuffer.clear();
+        materialMorphResultsByteBuffer.position(0);
+        materialMorphResultsBuffer.put(materialMorphResultsByteBuffer.asFloatBuffer());
+        materialMorphResultsBuffer.flip();
+    }
+    
+    private float getMaterialMorphAlpha(int materialIndex) {
+        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return 1.0f;
+        int offset = materialIndex * 28 + 3;
+        if (offset < materialMorphResultsBuffer.capacity()) {
+            return materialMorphResultsBuffer.get(offset);
+        }
+        return 1.0f;
+    }
     
     public static void Init(NativeFunc nativeFunc) {
         nf = nativeFunc;
@@ -152,6 +178,16 @@ public class MMDModelNativeRender implements IMMDModel {
             result.mats = mats;
             result.subMeshVertexBuffers = subMeshVertexBuffers;
             
+            // 初始化材质 Morph 结果缓冲区
+            int matMorphCount = nf.GetMaterialMorphResultCount(model);
+            if (matMorphCount > 0) {
+                int floatCount = matMorphCount * 28;
+                result.materialMorphResultCount = matMorphCount;
+                result.materialMorphResultsBuffer = MemoryUtil.memAllocFloat(floatCount);
+                result.materialMorphResultsByteBuffer = MemoryUtil.memAlloc(floatCount * 4);
+                result.materialMorphResultsByteBuffer.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            }
+            
             // 启用自动眨眼
             nf.SetAutoBlinkEnabled(model, true);
             
@@ -178,6 +214,14 @@ public class MMDModelNativeRender implements IMMDModel {
             MemoryUtil.memFree(uv0Buffer);
             uv0Buffer = null;
         }
+        if (materialMorphResultsBuffer != null) {
+            MemoryUtil.memFree(materialMorphResultsBuffer);
+            materialMorphResultsBuffer = null;
+        }
+        if (materialMorphResultsByteBuffer != null) {
+            MemoryUtil.memFree(materialMorphResultsByteBuffer);
+            materialMorphResultsByteBuffer = null;
+        }
         if (subMeshVertexBuffers != null) {
             for (VertexBuffer vb : subMeshVertexBuffers) {
                 if (vb != null) vb.close();
@@ -201,16 +245,21 @@ public class MMDModelNativeRender implements IMMDModel {
     }
     
     private void renderLivingEntity(LivingEntity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, float tickDelta, PoseStack poseStack, int packedLight, RenderContext context) {
-        // 头部角度处理
-        float headAngleX = Mth.clamp(entityIn.getXRot(), -50.0f, 50.0f);
-        float headAngleY = (entityYaw - Mth.lerp(tickDelta, entityIn.yHeadRotO, entityIn.yHeadRot)) % 360.0f;
-        if (headAngleY < -180.0f) headAngleY += 360.0f;
-        else if (headAngleY > 180.0f) headAngleY -= 360.0f;
-        headAngleY = Mth.clamp(headAngleY, -80.0f, 80.0f);
-        
-        float pitchRad = headAngleX * ((float) Math.PI / 180F);
-        float yawRad = context.isInventoryScene() ? -headAngleY * ((float) Math.PI / 180F) : headAngleY * ((float) Math.PI / 180F);
-        nf.SetHeadAngle(model, pitchRad, yawRad, 0.0f, context.isWorldScene());
+        // 头部角度处理（舞台播放时归零，由 VMD 动画控制）
+        boolean stagePlaying = MMDCameraController.getInstance().isStagePlayingModel(model);
+        if (stagePlaying) {
+            nf.SetHeadAngle(model, 0.0f, 0.0f, 0.0f, context.isWorldScene());
+        } else {
+            float headAngleX = Mth.clamp(entityIn.getXRot(), -50.0f, 50.0f);
+            float headAngleY = (entityYaw - Mth.lerp(tickDelta, entityIn.yHeadRotO, entityIn.yHeadRot)) % 360.0f;
+            if (headAngleY < -180.0f) headAngleY += 360.0f;
+            else if (headAngleY > 180.0f) headAngleY -= 360.0f;
+            headAngleY = Mth.clamp(headAngleY, -80.0f, 80.0f);
+            
+            float pitchRad = headAngleX * ((float) Math.PI / 180F);
+            float yawRad = context.isInventoryScene() ? -headAngleY * ((float) Math.PI / 180F) : headAngleY * ((float) Math.PI / 180F);
+            nf.SetHeadAngle(model, pitchRad, yawRad, 0.0f, context.isWorldScene());
+        }
         
         // 传递实体位置和朝向给物理系统（用于人物移动时的惯性效果）
         final float MODEL_SCALE = 0.09f;
@@ -220,7 +269,9 @@ public class MMDModelNativeRender implements IMMDModel {
         float bodyYaw = Mth.lerp(tickDelta, entityIn.yBodyRotO, entityIn.yBodyRot) * ((float) Math.PI / 180F);
         nf.SetModelPositionAndYaw(model, posX, posY, posZ, bodyYaw);
         
-        EyeTrackingHelper.updateEyeTracking(nf, model, entityIn, entityYaw, tickDelta, getModelName());
+        if (!stagePlaying) {
+            EyeTrackingHelper.updateEyeTracking(nf, model, entityIn, entityYaw, tickDelta, getModelName());
+        }
         
         Update();
         RenderModel(entityIn, entityYaw, entityPitch, entityTrans, poseStack, packedLight);
@@ -257,6 +308,9 @@ public class MMDModelNativeRender implements IMMDModel {
         float baseScale = 0.09f * com.shiroha.mmdskin.config.ModelConfigManager.getConfig(getModelName()).modelScale;
         poseStack.scale(baseScale, baseScale, baseScale);
         
+        // 获取材质 Morph 结果
+        fetchMaterialMorphResults();
+        
         // 从 Rust 引擎获取蒙皮后的顶点数据
         int posSize = vertexCount * 12;
         int norSize = vertexCount * 12;
@@ -287,7 +341,8 @@ public class MMDModelNativeRender implements IMMDModel {
             
             if (!nf.IsMaterialVisible(model, materialID)) continue;
             float alpha = nf.GetMaterialAlpha(model, materialID);
-            if (alpha == 0.0f) continue;
+            float morphAlpha = getMaterialMorphAlpha(materialID);
+            if (alpha * morphAlpha < 0.001f) continue;
             
             int startIndex = nf.GetSubMeshBeginIndex(model, i);
             int vertCount = nf.GetSubMeshVertexCount(model, i);
@@ -306,7 +361,7 @@ public class MMDModelNativeRender implements IMMDModel {
         if (mats[materialID].tex != 0) {
             RenderSystem.setShaderTexture(0, mats[materialID].tex);
         } else {
-            mc.getTextureManager().bindForSetup(TextureManager.INTENTIONAL_MISSING_TEXTURE);
+            RenderSystem.setShaderTexture(0, mc.getTextureManager().getTexture(TextureManager.INTENTIONAL_MISSING_TEXTURE).getId());
         }
         
         // === 关键：使用 Minecraft 原生着色器，Iris 会正确拦截 ===
