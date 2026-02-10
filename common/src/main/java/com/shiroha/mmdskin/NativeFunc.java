@@ -70,7 +70,7 @@ public class NativeFunc {
         // isLinux 排除 Android，避免误判
         isLinux = System.getProperty("os.name").toLowerCase().contains("linux") && !isAndroid;
     }
-    static final String libraryVersion = "v1.0.1";
+    static final String libraryVersion = "v1.0.2";
     private static final String RELEASE_BASE_URL = "https://github.com/shiroha-23/MC-MMD-rust/releases/download/" + libraryVersion + "/";
     private static volatile NativeFunc inst;
     private static final Object lock = new Object();
@@ -91,8 +91,8 @@ public class NativeFunc {
 
     /**
      * 生成带版本号的库文件名，从根本上避免文件替换冲突。
-     * 例如: mmd_engine.dll → mmd_engine_v1.0.1.dll
-     *       libmmd_engine.so → libmmd_engine_v1.0.1.so
+     * 例如: mmd_engine.dll → mmd_engine_v1.0.2.dll
+     *       libmmd_engine.so → libmmd_engine_v1.0.2.so
      */
     private static String getVersionedFileName(String baseFileName) {
         int dotIndex = baseFileName.lastIndexOf('.');
@@ -104,7 +104,7 @@ public class NativeFunc {
 
     /**
      * 从模组内置资源提取原生库。
-     * 使用版本化文件名（如 mmd_engine_v1.0.1.dll），新旧版本共存互不干扰。
+     * 使用版本化文件名（如 mmd_engine_v1.0.2.dll），新旧版本共存互不干扰。
      */
     private File extractNativeLibrary(String resourcePath, String fileName) {
         try {
@@ -122,7 +122,10 @@ public class NativeFunc {
                     logger.warn("内置原生库未找到: " + resourcePath);
                     return null;
                 }
-                Files.copy(is, targetPath);
+                // 先写入临时文件，完成后原子移动，防止中断后残留损坏文件
+                Path tempPath = Paths.get(getGameDirectory(), versionedName + ".tmp");
+                Files.copy(is, tempPath, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(tempPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
             }
 
             logger.info("已从模组内置资源释放原生库: " + versionedName);
@@ -227,7 +230,9 @@ public class NativeFunc {
                 boolean shouldDelete = false;
 
                 // 旧版本化文件: mmd_engine_v*.dll / libmmd_engine_v*.so 等
-                if (name.startsWith(baseName + "_v") && name.endsWith(ext)) {
+                // 同时匹配其残留临时文件: mmd_engine_v*.dll.download / .tmp
+                if (name.startsWith(baseName + "_v") && (name.endsWith(ext)
+                        || name.endsWith(ext + ".download") || name.endsWith(ext + ".tmp"))) {
                     shouldDelete = true;
                 }
                 // 遗留的非版本化文件和辅助文件（旧方案残留）

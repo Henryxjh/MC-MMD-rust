@@ -15,7 +15,7 @@ use crate::texture::load_texture;
 
 use super::{register_animation, register_model, register_texture, ANIMATIONS, MODELS, TEXTURES};
 
-const VERSION: &str = "v1.0.1";
+const VERSION: &str = "v1.0.2";
 
 // ============================================================================
 // 基础函数
@@ -59,15 +59,29 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyDataToByteBuffer(
     data: jlong,
     len: jlong,
 ) {
-    if data == 0 {
+    if data == 0 || len <= 0 {
         return;
     }
 
-    if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-        unsafe {
-            let src = data as *const u8;
-            ptr::copy_nonoverlapping(src, dst, len as usize);
-        }
+    let dst = match env.get_direct_buffer_address(&buffer) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let capacity = match env.get_direct_buffer_capacity(&buffer) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let copy_len = len as usize;
+    if copy_len > capacity {
+        log::error!(
+            "CopyDataToByteBuffer: 长度 {} 超过缓冲区容量 {}，已阻止越界写入",
+            copy_len, capacity
+        );
+        return;
+    }
+    unsafe {
+        let src = data as *const u8;
+        ptr::copy_nonoverlapping(src, dst, copy_len);
     }
 }
 
@@ -174,7 +188,10 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetPoss(
     let models = MODELS.read().unwrap();
     models
         .get(&model)
-        .map(|m| m.lock().unwrap().get_positions_ptr() as jlong)
+        .map(|m| {
+            let mg = m.lock().unwrap();
+            if mg.update_positions_raw.is_empty() { 0 } else { mg.get_positions_ptr() as jlong }
+        })
         .unwrap_or(0)
 }
 
@@ -188,7 +205,10 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetNormals(
     let models = MODELS.read().unwrap();
     models
         .get(&model)
-        .map(|m| m.lock().unwrap().get_normals_ptr() as jlong)
+        .map(|m| {
+            let mg = m.lock().unwrap();
+            if mg.update_normals_raw.is_empty() { 0 } else { mg.get_normals_ptr() as jlong }
+        })
         .unwrap_or(0)
 }
 
@@ -202,7 +222,10 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetUVs(
     let models = MODELS.read().unwrap();
     models
         .get(&model)
-        .map(|m| m.lock().unwrap().get_uvs_ptr() as jlong)
+        .map(|m| {
+            let mg = m.lock().unwrap();
+            if mg.update_uvs_raw.is_empty() { 0 } else { mg.get_uvs_ptr() as jlong }
+        })
         .unwrap_or(0)
 }
 
@@ -779,23 +802,30 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetCameraTransform(
     if let Some(animation) = animations.get(&anim) {
         let transform = animation.get_camera_transform(frame);
         
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            unsafe {
-                let ptr = dst as *mut f32;
-                // position (3 × f32)
-                *ptr.add(0) = transform.position.x;
-                *ptr.add(1) = transform.position.y;
-                *ptr.add(2) = transform.position.z;
-                // rotation (3 × f32, 欧拉角弧度)
-                *ptr.add(3) = transform.rotation.x;
-                *ptr.add(4) = transform.rotation.y;
-                *ptr.add(5) = transform.rotation.z;
-                // fov (f32)
-                *ptr.add(6) = transform.fov;
-                // is_perspective (i32, 0/1)
-                let i_ptr = ptr.add(7) as *mut i32;
-                *i_ptr = if transform.is_perspective { 1 } else { 0 };
-            }
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if capacity < 32 {
+            log::error!("GetCameraTransform: 缓冲区容量 {} < 32 字节", capacity);
+            return;
+        }
+        unsafe {
+            let ptr = dst as *mut f32;
+            // position (3 × f32)
+            *ptr.add(0) = transform.position.x;
+            *ptr.add(1) = transform.position.y;
+            *ptr.add(2) = transform.position.z;
+            // rotation (3 × f32, 欧拉角弧度)
+            *ptr.add(3) = transform.rotation.x;
+            *ptr.add(4) = transform.rotation.y;
+            *ptr.add(5) = transform.rotation.z;
+            // fov (f32)
+            *ptr.add(6) = transform.fov;
+            // is_perspective (i32, 0/1)
+            let i_ptr = ptr.add(7) as *mut i32;
+            *i_ptr = if transform.is_perspective { 1 } else { 0 };
         }
     }
 }
@@ -1362,13 +1392,20 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyMatToBuffer(
 ) -> jboolean {
     let matrices = MATRICES.lock().unwrap();
     if let Some(m) = matrices.get(&mat) {
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            unsafe {
-                let src = m as *const glam::Mat4 as *const u8;
-                ptr::copy_nonoverlapping(src, dst, 64);
-            }
-            return 1;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if capacity < 64 {
+            log::error!("CopyMatToBuffer: 缓冲区容量 {} < 64 字节", capacity);
+            return 0;
         }
+        unsafe {
+            let src = m as *const glam::Mat4 as *const u8;
+            ptr::copy_nonoverlapping(src, dst, 64);
+        }
+        return 1;
     }
     0
 }
@@ -1695,25 +1732,22 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopySkinningMatricesT
             return 0;
         }
         
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            let bone_count = matrices.len();
-            
-            // 检查缓冲区容量
-            if let Ok(capacity) = env.get_direct_buffer_capacity(&buffer) {
-                let required = bone_count * 64;
-                if capacity < required {
-                    log::warn!("蒙皮矩阵缓冲区容量不足: {} < {}", capacity, required);
-                    return 0;
-                }
-            }
-            
-            let byte_size = bone_count * 64; // 每个 Mat4 = 16 floats * 4 bytes
-            unsafe {
-                let src = matrices.as_ptr() as *const u8;
-                ptr::copy_nonoverlapping(src, dst, byte_size);
-            }
-            return bone_count as jint;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let bone_count = matrices.len();
+        let byte_size = bone_count * 64; // 每个 Mat4 = 16 floats * 4 bytes
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if byte_size > capacity {
+            log::error!("CopySkinningMatricesToBuffer: 需要 {} 字节, 容量 {}", byte_size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = matrices.as_ptr() as *const u8;
+            ptr::copy_nonoverlapping(src, dst, byte_size);
+        }
+        return bone_count as jint;
     }
     0
 }
@@ -1728,7 +1762,9 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetBoneIndices(
     let models = MODELS.read().unwrap();
     if let Some(model_arc) = models.get(&model) {
         let model = model_arc.lock().unwrap();
-        return model.get_bone_indices_ptr() as jlong;
+        let ptr = model.get_bone_indices_ptr();
+        if ptr.is_null() { return 0; }
+        return ptr as jlong;
     }
     0
 }
@@ -1750,14 +1786,21 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyBoneIndicesToBuff
             return 0;
         }
         
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            let byte_size = (vertex_count as usize) * 16; // 4 int * 4 bytes
-            unsafe {
-                let src = ptr as *const u8;
-                ptr::copy_nonoverlapping(src, dst, byte_size);
-            }
-            return vertex_count;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let byte_size = (vertex_count as usize) * 16; // 4 int * 4 bytes
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if byte_size > capacity {
+            log::error!("CopyBoneIndicesToBuffer: 需要 {} 字节, 容量 {}", byte_size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = ptr as *const u8;
+            ptr::copy_nonoverlapping(src, dst, byte_size);
+        }
+        return vertex_count;
     }
     0
 }
@@ -1772,7 +1815,9 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetBoneWeights(
     let models = MODELS.read().unwrap();
     if let Some(model_arc) = models.get(&model) {
         let model = model_arc.lock().unwrap();
-        return model.get_bone_weights_ptr() as jlong;
+        let ptr = model.get_bone_weights_ptr();
+        if ptr.is_null() { return 0; }
+        return ptr as jlong;
     }
     0
 }
@@ -1794,14 +1839,21 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyBoneWeightsToBuff
             return 0;
         }
         
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            let byte_size = (vertex_count as usize) * 16; // 4 float * 4 bytes
-            unsafe {
-                let src = ptr as *const u8;
-                ptr::copy_nonoverlapping(src, dst, byte_size);
-            }
-            return vertex_count;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let byte_size = (vertex_count as usize) * 16; // 4 float * 4 bytes
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if byte_size > capacity {
+            log::error!("CopyBoneWeightsToBuffer: 需要 {} 字节, 容量 {}", byte_size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = ptr as *const u8;
+            ptr::copy_nonoverlapping(src, dst, byte_size);
+        }
+        return vertex_count;
     }
     0
 }
@@ -1816,7 +1868,9 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetOriginalPositions(
     let models = MODELS.read().unwrap();
     if let Some(model_arc) = models.get(&model) {
         let model = model_arc.lock().unwrap();
-        return model.get_original_positions_ptr() as jlong;
+        let ptr = model.get_original_positions_ptr();
+        if ptr.is_null() { return 0; }
+        return ptr as jlong;
     }
     0
 }
@@ -1838,14 +1892,21 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyOriginalPositions
             return 0;
         }
         
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            let byte_size = (vertex_count as usize) * 12; // 3 float * 4 bytes
-            unsafe {
-                let src = ptr as *const u8;
-                ptr::copy_nonoverlapping(src, dst, byte_size);
-            }
-            return vertex_count;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let byte_size = (vertex_count as usize) * 12; // 3 float * 4 bytes
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if byte_size > capacity {
+            log::error!("CopyOriginalPositionsToBuffer: 需要 {} 字节, 容量 {}", byte_size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = ptr as *const u8;
+            ptr::copy_nonoverlapping(src, dst, byte_size);
+        }
+        return vertex_count;
     }
     0
 }
@@ -1860,7 +1921,9 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetOriginalNormals(
     let models = MODELS.read().unwrap();
     if let Some(model_arc) = models.get(&model) {
         let model = model_arc.lock().unwrap();
-        return model.get_original_normals_ptr() as jlong;
+        let ptr = model.get_original_normals_ptr();
+        if ptr.is_null() { return 0; }
+        return ptr as jlong;
     }
     0
 }
@@ -1882,14 +1945,21 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyOriginalNormalsTo
             return 0;
         }
         
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            let byte_size = (vertex_count as usize) * 12; // 3 float * 4 bytes
-            unsafe {
-                let src = ptr as *const u8;
-                ptr::copy_nonoverlapping(src, dst, byte_size);
-            }
-            return vertex_count;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let byte_size = (vertex_count as usize) * 12; // 3 float * 4 bytes
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if byte_size > capacity {
+            log::error!("CopyOriginalNormalsToBuffer: 需要 {} 字节, 容量 {}", byte_size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = ptr as *const u8;
+            ptr::copy_nonoverlapping(src, dst, byte_size);
+        }
+        return vertex_count;
     }
     0
 }
@@ -2105,13 +2175,20 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyGpuMorphOffsetsTo
             return 0;
         }
         
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            unsafe {
-                let src = model.get_gpu_morph_offsets_ptr() as *const u8;
-                ptr::copy_nonoverlapping(src, dst, size);
-            }
-            return size as jlong;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if size > capacity {
+            log::error!("CopyGpuMorphOffsetsToBuffer: 需要 {} 字节, 容量 {}", size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = model.get_gpu_morph_offsets_ptr() as *const u8;
+            ptr::copy_nonoverlapping(src, dst, size);
+        }
+        return size as jlong;
     }
     0
 }
@@ -2133,13 +2210,20 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyGpuMorphWeightsTo
         }
         
         let byte_size = morph_count * 4; // float = 4 bytes
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            unsafe {
-                let src = model.get_gpu_morph_weights_ptr() as *const u8;
-                ptr::copy_nonoverlapping(src, dst, byte_size);
-            }
-            return morph_count as jint;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if byte_size > capacity {
+            log::error!("CopyGpuMorphWeightsToBuffer: 需要 {} 字节, 容量 {}", byte_size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = model.get_gpu_morph_weights_ptr() as *const u8;
+            ptr::copy_nonoverlapping(src, dst, byte_size);
+        }
+        return morph_count as jint;
     }
     0
 }
@@ -2400,13 +2484,20 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyGpuUvMorphOffsets
             return 0;
         }
 
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            unsafe {
-                let src = model.get_gpu_uv_morph_offsets_ptr() as *const u8;
-                ptr::copy_nonoverlapping(src, dst, size);
-            }
-            return size as jlong;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if size > capacity {
+            log::error!("CopyGpuUvMorphOffsetsToBuffer: 需要 {} 字节, 容量 {}", size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = model.get_gpu_uv_morph_offsets_ptr() as *const u8;
+            ptr::copy_nonoverlapping(src, dst, size);
+        }
+        return size as jlong;
     }
     0
 }
@@ -2428,13 +2519,20 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyGpuUvMorphWeights
         }
 
         let byte_size = morph_count * 4;
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            unsafe {
-                let src = model.get_gpu_uv_morph_weights_ptr() as *const u8;
-                ptr::copy_nonoverlapping(src, dst, byte_size);
-            }
-            return morph_count as jint;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if byte_size > capacity {
+            log::error!("CopyGpuUvMorphWeightsToBuffer: 需要 {} 字节, 容量 {}", byte_size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = model.get_gpu_uv_morph_weights_ptr() as *const u8;
+            ptr::copy_nonoverlapping(src, dst, byte_size);
+        }
+        return morph_count as jint;
     }
     0
 }
@@ -2481,13 +2579,20 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyMaterialMorphResu
         }
 
         let byte_size = flat.len() * 4;
-        if let Ok(dst) = env.get_direct_buffer_address(&buffer) {
-            unsafe {
-                let src = flat.as_ptr() as *const u8;
-                ptr::copy_nonoverlapping(src, dst, byte_size);
-            }
-            return result_count as jint;
+        let dst = match env.get_direct_buffer_address(&buffer) {
+            Ok(p) => p,
+            Err(_) => return 0,
+        };
+        let capacity = env.get_direct_buffer_capacity(&buffer).unwrap_or(0);
+        if byte_size > capacity {
+            log::error!("CopyMaterialMorphResultsToBuffer: 需要 {} 字节, 容量 {}", byte_size, capacity);
+            return 0;
         }
+        unsafe {
+            let src = flat.as_ptr() as *const u8;
+            ptr::copy_nonoverlapping(src, dst, byte_size);
+        }
+        return result_count as jint;
     }
     0
 }
