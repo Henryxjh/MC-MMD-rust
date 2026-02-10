@@ -1162,6 +1162,54 @@ impl MmdModel {
         self.indices.as_ptr()
     }
 
+    // ========== 批量子网格元数据（G3 优化）==========
+    
+    /// 批量获取所有子网格的渲染元数据，避免 Java 侧逐子网格 JNI 调用
+    ///
+    /// 输出布局（每子网格 20 字节）：
+    /// - offset  0: i32 materialID
+    /// - offset  4: i32 beginIndex
+    /// - offset  8: i32 vertexCount
+    /// - offset 12: f32 alpha（基础材质 alpha，Java 侧再叠加 morph）
+    /// - offset 16: u8  isVisible (0/1)
+    /// - offset 17: u8  bothFace  (0/1)
+    /// - offset 18: u16 padding
+    ///
+    /// 返回写入的子网格数量
+    pub fn batch_get_sub_mesh_data(&self, output: &mut [u8]) -> usize {
+        const STRIDE: usize = 20;
+        let count = self.submeshes.len();
+        if output.len() < count * STRIDE {
+            return 0;
+        }
+        
+        for (i, submesh) in self.submeshes.iter().enumerate() {
+            let mat_id = submesh.material_id as i32;
+            let begin = submesh.begin_index as i32;
+            let vert_count = submesh.index_count as i32;
+            let alpha = self.materials.get(submesh.material_id as usize)
+                .map(|m| m.diffuse.w)
+                .unwrap_or(1.0f32);
+            let visible: u8 = if self.is_material_visible(submesh.material_id as usize) { 1 } else { 0 };
+            let both_face: u8 = self.materials.get(submesh.material_id as usize)
+                .map(|m| if m.is_double_sided() { 1u8 } else { 0u8 })
+                .unwrap_or(0u8);
+
+            unsafe {
+                let p = output.as_mut_ptr().add(i * STRIDE);
+                (p as *mut i32).write_unaligned(mat_id);
+                (p.add(4) as *mut i32).write_unaligned(begin);
+                (p.add(8) as *mut i32).write_unaligned(vert_count);
+                (p.add(12) as *mut f32).write_unaligned(alpha);
+                *p.add(16) = visible;
+                *p.add(17) = both_face;
+                // padding bytes 18-19 left as-is
+            }
+        }
+        
+        count
+    }
+    
     // ========== NativeRender MC 顶点构建（P2-9 优化）==========
     
     /// 构建 MC NEW_ENTITY 格式的交错顶点数据（含矩阵变换）
@@ -1209,6 +1257,7 @@ impl MmdModel {
         let uvs = &self.update_uvs_raw;
         let indices = &self.indices;
         
+        let mut written: usize = 0;
         for i in 0..count {
             let global_idx = begin + i;
             if global_idx >= indices.len() {
@@ -1216,10 +1265,16 @@ impl MmdModel {
             }
             let idx = indices[global_idx] as usize;
             if idx >= vertex_count {
+                // 索引越界：写入零顶点（避免输出缓冲区空洞）
+                unsafe {
+                    let p = output.as_mut_ptr().add(written * STRIDE);
+                    std::ptr::write_bytes(p, 0, STRIDE);
+                }
+                written += 1;
                 continue;
             }
 
-            let out_offset = i * STRIDE;
+            let out_offset = written * STRIDE;
 
             // 读取蒙皮后的位置并应用 pose 矩阵变换
             let px = positions[idx * 3];
@@ -1259,9 +1314,10 @@ impl MmdModel {
                 *p.add(34) = (nor.z.clamp(-1.0, 1.0) * 127.0) as i8 as u8;
                 *p.add(35) = 0; // padding
             }
+            written += 1;
         }
         
-        count
+        written
     }
     
     // ========== GPU 蒙皮相关方法 ==========

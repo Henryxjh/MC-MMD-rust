@@ -58,6 +58,9 @@ public class MMDModelNativeRender implements IMMDModel {
     private ByteBuffer poseMatBuf;     // 4×4 pose 矩阵（64 字节）
     private ByteBuffer normalMatBuf;   // 3×3 normal 矩阵（36 字节）
 
+    // G3 优化：批量子网格元数据缓冲区（每子网格 20 字节，每帧复用）
+    private ByteBuffer subMeshDataBuf;
+    
     // 材质
     Material[] mats;
 
@@ -68,6 +71,7 @@ public class MMDModelNativeRender implements IMMDModel {
 
     // 预分配临时对象（避免每帧分配）
     private final Quaternionf tempQuat = new Quaternionf();
+    private final Matrix4f tempModelView = new Matrix4f();
     
     // 时间追踪
     private long lastUpdateTime = -1;
@@ -137,6 +141,7 @@ public class MMDModelNativeRender implements IMMDModel {
         int vao = 0;
         int[] vbos = null;
         ByteBuffer mcVertexBuf = null, poseMatBuf = null, normalMatBuf = null;
+        ByteBuffer subMeshDataBufLocal = null;
 
         try {
             int vertexCount = (int) nf.GetVertexCount(model);
@@ -189,6 +194,9 @@ public class MMDModelNativeRender implements IMMDModel {
             result.mcVertexBuf = mcVertexBuf;
             result.poseMatBuf = poseMatBuf;
             result.normalMatBuf = normalMatBuf;
+            subMeshDataBufLocal = MemoryUtil.memAlloc(subMeshCount * 20);
+            subMeshDataBufLocal.order(ByteOrder.LITTLE_ENDIAN);
+            result.subMeshDataBuf = subMeshDataBufLocal;
 
             // 初始化材质 Morph 结果缓冲区
             int matMorphCount = nf.GetMaterialMorphResultCount(model);
@@ -216,6 +224,7 @@ public class MMDModelNativeRender implements IMMDModel {
             if (mcVertexBuf != null) MemoryUtil.memFree(mcVertexBuf);
             if (poseMatBuf != null) MemoryUtil.memFree(poseMatBuf);
             if (normalMatBuf != null) MemoryUtil.memFree(normalMatBuf);
+            if (subMeshDataBufLocal != null) MemoryUtil.memFree(subMeshDataBufLocal);
             if (vao != 0) GL46C.glDeleteVertexArrays(vao);
             if (vbos != null) {
                 for (int vbo : vbos) {
@@ -232,6 +241,7 @@ public class MMDModelNativeRender implements IMMDModel {
         if (mcVertexBuf != null) { MemoryUtil.memFree(mcVertexBuf); mcVertexBuf = null; }
         if (poseMatBuf != null) { MemoryUtil.memFree(poseMatBuf); poseMatBuf = null; }
         if (normalMatBuf != null) { MemoryUtil.memFree(normalMatBuf); normalMatBuf = null; }
+        if (subMeshDataBuf != null) { MemoryUtil.memFree(subMeshDataBuf); subMeshDataBuf = null; }
         if (materialMorphResultsBuffer != null) {
             MemoryUtil.memFree(materialMorphResultsBuffer);
             materialMorphResultsBuffer = null;
@@ -369,15 +379,22 @@ public class MMDModelNativeRender implements IMMDModel {
         RenderSystem.enableDepthTest();
         RenderSystem.defaultBlendFunc();
 
+        // G3 优化：批量获取所有子网格元数据（1 次 JNI 替代 ~4×N 次/帧）
+        subMeshDataBuf.clear();
+        nf.BatchGetSubMeshData(model, subMeshDataBuf);
+        
         // 按子网格渲染
         for (int i = 0; i < subMeshCount; i++) {
-            int materialID = nf.GetSubMeshMaterialID(model, i);
+            int base = i * 20;
+            int materialID  = subMeshDataBuf.getInt(base);
+            float alpha     = subMeshDataBuf.getFloat(base + 12);
+            boolean visible = subMeshDataBuf.get(base + 16) != 0;
+            boolean bothFace= subMeshDataBuf.get(base + 17) != 0;
 
-            if (!nf.IsMaterialVisible(model, materialID)) continue;
-            float alpha = nf.GetMaterialAlpha(model, materialID);
+            if (!visible) continue;
             if (getEffectiveMaterialAlpha(materialID, alpha) < 0.001f) continue;
 
-            renderSubMesh(poseStack, packedLight, materialID, i, mc);
+            renderSubMesh(poseStack, packedLight, materialID, bothFace, i, mc);
         }
 
         poseStack.popPose();
@@ -390,7 +407,7 @@ public class MMDModelNativeRender implements IMMDModel {
      * - Rust 侧完成 SoA→AoS 转换 + 矩阵变换 + 格式打包（1 次 JNI 调用）
      * - Java 侧仅上传 + 绑定着色器 + 绘制
      */
-    private void renderSubMesh(PoseStack poseStack, int packedLight, int materialID, int subMeshIndex, Minecraft mc) {
+    private void renderSubMesh(PoseStack poseStack, int packedLight, int materialID, boolean bothFace, int subMeshIndex, Minecraft mc) {
         // 设置纹理
         if (mats[materialID].tex != 0) {
             RenderSystem.setShaderTexture(0, mats[materialID].tex);
@@ -401,8 +418,7 @@ public class MMDModelNativeRender implements IMMDModel {
         // 使用 Minecraft 原生着色器（Iris 会正确拦截）
         RenderSystem.setShader(GameRenderer::getRendertypeEntityCutoutNoCullShader);
 
-        // 双面渲染
-        boolean bothFace = nf.GetMaterialBothFace(model, materialID);
+        // 双面渲染（bothFace 已从 subMeshDataBuf 批量获取）
         if (bothFace) {
             RenderSystem.disableCull();
         } else {
@@ -437,7 +453,7 @@ public class MMDModelNativeRender implements IMMDModel {
         }
 
         // 设置 uniform（复制自 VertexBuffer.drawWithShader 的逻辑）
-        Matrix4f modelView = new Matrix4f(RenderSystem.getModelViewMatrix());
+        Matrix4f modelView = tempModelView.set(RenderSystem.getModelViewMatrix());
         Matrix4f projection = RenderSystem.getProjectionMatrix();
         for (int i = 0; i < 12; ++i) {
             int j = RenderSystem.getShaderTexture(i);

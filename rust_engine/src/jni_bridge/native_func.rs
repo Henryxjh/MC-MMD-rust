@@ -15,7 +15,7 @@ use crate::texture::load_texture;
 
 use super::{register_animation, register_model, register_texture, ANIMATIONS, MODELS, TEXTURES};
 
-const VERSION: &str = "Rust-20260125";
+const VERSION: &str = "v1.0.1";
 
 // ============================================================================
 // 基础函数
@@ -2627,6 +2627,40 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetEyeBonePosition(
         let pos = model.get_eye_bone_animated_position();
         let buf: [f32; 3] = [pos.x, pos.y, pos.z];
         let _ = env.set_float_array_region(&out, 0, &buf);
+    }
+}
+
+// ================================================================
+// 批量子网格元数据（G3 优化）
+// ================================================================
+
+/// 批量获取所有子网格的渲染元数据，消除 Java 侧逐子网格 JNI 调用
+/// 每子网格 20 字节：materialID(i32) + beginIndex(i32) + vertexCount(i32) + alpha(f32) + isVisible(u8) + bothFace(u8) + pad(2)
+#[no_mangle]
+pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_BatchGetSubMeshData(
+    env: JNIEnv,
+    _class: JClass,
+    model: jlong,
+    buffer: JByteBuffer,
+) -> jint {
+    let out_ptr = match env.get_direct_buffer_address(&buffer) {
+        Ok(p) => p,
+        Err(_) => return 0,
+    };
+    let out_cap = match env.get_direct_buffer_capacity(&buffer) {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+    let output = unsafe {
+        std::slice::from_raw_parts_mut(out_ptr, out_cap)
+    };
+    
+    let models = MODELS.read().unwrap();
+    if let Some(model_arc) = models.get(&model) {
+        let model = model_arc.lock().unwrap();
+        model.batch_get_sub_mesh_data(output) as jint
+    } else {
+        0
     }
 }
 

@@ -362,7 +362,7 @@ public class SkinningComputeShader {
     }
     
     /**
-     * 执行蒸皮计算（无 UV Morph 的兼容版本）
+     * 执行蒙皮计算（无 UV Morph 的兼容版本）
      */
     public void dispatch(int origPosBuffer, int origNorBuffer,
                          int boneIdxBuffer, int boneWgtBuffer,
@@ -447,7 +447,7 @@ public class SkinningComputeShader {
     }
     
     /**
-     * 创建蒸皮后 UV 输出缓冲区
+     * 创建蒙皮后 UV 输出缓冲区
      */
     public static int createSkinnedUvBuffer(int vertexCount) {
         int buffer = GL46C.glGenBuffers();

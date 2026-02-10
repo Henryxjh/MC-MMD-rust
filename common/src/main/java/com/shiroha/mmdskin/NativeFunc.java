@@ -81,6 +81,7 @@ public class NativeFunc {
                 if (inst == null) {
                     NativeFunc newInst = new NativeFunc();
                     newInst.Init();
+                    newInst.verifyLoadedLibraryVersion();
                     inst = newInst;
                 }
             }
@@ -130,6 +131,28 @@ public class NativeFunc {
             }
         } catch (Exception e) {
             logger.warn("重命名旧库文件失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 应用上次版本校验留下的 .new 文件（Windows 下 DLL 被锁定时写入）
+     * 此时旧进程已退出，DLL 不再被锁定，可以安全替换
+     */
+    private void applyPendingNewLibrary(String fileName) {
+        try {
+            Path newPath = Paths.get(getGameDirectory(), fileName + ".new");
+            if (!Files.exists(newPath)) return;
+            
+            Path targetPath = Paths.get(getGameDirectory(), fileName);
+            if (Files.exists(targetPath)) {
+                renameOldLibrary(fileName);
+            }
+            Files.move(newPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            // 清除旧版本缓存，extractNativeLibrary 会重新写入正确版本
+            Files.deleteIfExists(Paths.get(getGameDirectory(), fileName + ".version"));
+            logger.info("已将待更新库 " + fileName + ".new 替换为正式文件");
+        } catch (Exception e) {
+            logger.warn("应用待更新库失败: " + fileName + ".new - " + e.getMessage());
         }
     }
 
@@ -255,6 +278,80 @@ public class NativeFunc {
         System.load(file.getAbsolutePath());
     }
 
+    /**
+     * 运行时版本校验：加载原生库后，调用 GetVersion() 与 Java 侧 libraryVersion 比较。
+     * JVM 无法卸载已加载的 native library，因此版本不匹配时：
+     * - 清除 .version 缓存文件（确保下次启动不会命中缓存）
+     * - 从 JAR 内置资源释放新版本文件覆盖旧文件
+     * - 当前会话继续使用已加载的旧版本，下次启动将加载新版本
+     */
+    private void verifyLoadedLibraryVersion() {
+        try {
+            String rustVersion = GetVersion();
+            if (libraryVersion.equals(rustVersion)) {
+                logger.info("原生库版本校验通过: " + rustVersion);
+                return;
+            }
+
+            logger.warn("原生库版本不匹配！Java 侧期望: " + libraryVersion + ", Rust 侧实际: " + rustVersion);
+            logger.warn("当前会话将继续使用已加载的旧版本，正在准备新版本供下次启动...");
+
+            // 确定当前平台的文件名和资源路径
+            String fileName;
+            String resourcePath;
+            if (isWindows) {
+                String archDir = isArm64 ? "windows-arm64" : "windows-x64";
+                fileName = "mmd_engine.dll";
+                resourcePath = "/natives/" + archDir + "/mmd_engine.dll";
+            } else if (isMacOS) {
+                String archDir = isArm64 ? "macos-arm64" : "macos-x64";
+                fileName = "libmmd_engine.dylib";
+                resourcePath = "/natives/" + archDir + "/libmmd_engine.dylib";
+            } else if (isAndroid) {
+                fileName = "libmmd_engine.so";
+                resourcePath = "/natives/android-arm64/libmmd_engine.so";
+            } else {
+                String archDir;
+                if (isArm64) archDir = "linux-arm64";
+                else if (isLoongArch64) archDir = "linux-loongarch64";
+                else if (isRiscv64) archDir = "linux-riscv64";
+                else archDir = "linux-x64";
+                fileName = "libmmd_engine.so";
+                resourcePath = "/natives/" + archDir + "/libmmd_engine.so";
+            }
+
+            // 清除 .version 缓存（强制下次重新释放）
+            try {
+                Path versionPath = Paths.get(getGameDirectory(), fileName + ".version");
+                Files.deleteIfExists(versionPath);
+                logger.info("已清除版本缓存文件: " + fileName + ".version");
+            } catch (Exception e) {
+                logger.warn("清除版本缓存失败: " + e.getMessage());
+            }
+
+            // 尝试释放新版本文件（Windows 下已加载的 DLL 无法覆盖，写入 .new 文件）
+            try (InputStream is = NativeFunc.class.getResourceAsStream(resourcePath)) {
+                if (is != null) {
+                    Path targetPath = Paths.get(getGameDirectory(), fileName);
+                    try {
+                        Files.copy(is, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                        saveInstalledVersion(fileName, libraryVersion);
+                        logger.info("已释放新版本原生库，下次启动将加载: " + libraryVersion);
+                    } catch (Exception ex) {
+                        // Windows 下 DLL 被锁定，写入 .new 文件
+                        Path newPath = Paths.get(getGameDirectory(), fileName + ".new");
+                        Files.copy(is, newPath, StandardCopyOption.REPLACE_EXISTING);
+                        logger.info("当前库文件被锁定，已将新版本写入: " + fileName + ".new（下次启动前请手动替换，或等待自动替换）");
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("释放新版本原生库失败: " + e.getMessage());
+            }
+        } catch (Exception | Error e) {
+            logger.warn("运行时版本校验失败（GetVersion 调用异常）: " + e.getMessage());
+        }
+    }
+
     private void initAndroid() {
         logger.info("Android Env Detected! Arch: arm64");
         logger.info("  os.name=" + System.getProperty("os.name") + " os.arch=" + System.getProperty("os.arch"));
@@ -373,6 +470,12 @@ public class NativeFunc {
         String resourcePath;
         String fileName;
         String downloadFileName;
+
+        // 检查上次版本校验留下的 .new 文件（Windows 下 DLL 被锁定时写入）
+        // 此时旧进程已退出，DLL 不再被锁定，可以安全替换
+        applyPendingNewLibrary("mmd_engine.dll");
+        applyPendingNewLibrary("libmmd_engine.dylib");
+        applyPendingNewLibrary("libmmd_engine.so");
         
         if (isWindows) {
             String archDir = isArm64 ? "windows-arm64" : "windows-x64";
@@ -1073,6 +1176,26 @@ public class NativeFunc {
      * @return 材质数量
      */
     public native int CopyMaterialMorphResultsToBuffer(long model, java.nio.ByteBuffer buffer);
+
+    // ========== 批量子网格元数据（G3 优化）==========
+    
+    /**
+     * 批量获取所有子网格的渲染元数据，消除逐子网格 JNI 调用
+     * 
+     * 每子网格 20 字节：
+     * - offset  0: int materialID
+     * - offset  4: int beginIndex
+     * - offset  8: int vertexCount
+     * - offset 12: float alpha（基础材质 alpha）
+     * - offset 16: byte isVisible (0/1)
+     * - offset 17: byte bothFace  (0/1)
+     * - offset 18-19: padding
+     * 
+     * @param model  模型句柄
+     * @param buffer 输出缓冲区（DirectByteBuffer，需预分配 subMeshCount * 20 字节）
+     * @return 写入的子网格数量
+     */
+    public native int BatchGetSubMeshData(long model, java.nio.ByteBuffer buffer);
     
     // ========== NativeRender 顶点构建（P2-9 优化）==========
     

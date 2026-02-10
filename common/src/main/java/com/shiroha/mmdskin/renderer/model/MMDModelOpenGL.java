@@ -922,7 +922,8 @@ public class MMDModelOpenGL implements IMMDModel {
             for (long i = 0; i < subMeshCount; ++i) {
                 int materialID = nf.GetSubMeshMaterialID(model, i);
                 if (!nf.IsMaterialVisible(model, materialID)) continue;
-                if (nf.GetMaterialAlpha(model, materialID) == 0.0f) continue;
+                float edgeAlpha = nf.GetMaterialAlpha(model, materialID);
+                if (getEffectiveMaterialAlpha(materialID, edgeAlpha) < 0.001f) continue;
                 
                 long startPos = (long) nf.GetSubMeshBeginIndex(model, i) * indexElementSize;
                 int count = nf.GetSubMeshVertexCount(model, i);
