@@ -139,9 +139,9 @@ public class NativeFunc {
     /**
      * 从 GitHub Release 下载原生库
      */
-    private File downloadNativeLibrary(String downloadFileName, String localFileName) {
+    private File downloadNativeLibrary(String downloadFileName) {
         try {
-            String versionedName = getVersionedFileName(localFileName);
+            String versionedName = getVersionedFileName(downloadFileName);
             Path targetPath = Paths.get(getGameDirectory(), versionedName);
 
             if (targetPath.toFile().exists()) {
@@ -149,7 +149,7 @@ public class NativeFunc {
                 return targetPath.toFile();
             }
 
-            String urlStr = RELEASE_BASE_URL + downloadFileName;
+            String urlStr = RELEASE_BASE_URL + versionedName;
             logger.info("正在从 GitHub 下载原生库: " + urlStr);
 
             // GitHub Release 会 302 重定向到 CDN，手动跟随重定向
@@ -195,8 +195,7 @@ public class NativeFunc {
         } catch (Exception e) {
             logger.error("下载原生库失败: " + downloadFileName + " - " + e.getMessage());
             try {
-                String versionedName = getVersionedFileName(localFileName);
-                Files.deleteIfExists(Paths.get(getGameDirectory(), versionedName + ".download"));
+                Files.deleteIfExists(Paths.get(getGameDirectory(), getVersionedFileName(downloadFileName) + ".download"));
             } catch (Exception ignored) {}
             return null;
         }
@@ -210,7 +209,7 @@ public class NativeFunc {
      * 清理旧版本库文件和遗留的辅助文件（.version/.old/.new/.download）。
      * 采用尽力清理策略，失败不影响正常运行。
      */
-    private void cleanupOldLibraries(String baseFileName) {
+    private void cleanupOldLibraries(String baseFileName, String downloadBaseFileName) {
         try {
             File gameDir = new File(getGameDirectory());
             int dotIndex = baseFileName.lastIndexOf('.');
@@ -218,20 +217,21 @@ public class NativeFunc {
 
             String baseName = baseFileName.substring(0, dotIndex);
             String ext = baseFileName.substring(dotIndex);
-            String currentVersioned = getVersionedFileName(baseFileName);
+            String currentVersionedLocal = getVersionedFileName(baseFileName);
+            String currentVersionedDownload = getVersionedFileName(downloadBaseFileName);
 
             File[] files = gameDir.listFiles();
             if (files == null) return;
 
             for (File f : files) {
                 String name = f.getName();
-                if (name.equals(currentVersioned)) continue;
+                if (name.equals(currentVersionedLocal) || name.equals(currentVersionedDownload)) continue;
 
                 boolean shouldDelete = false;
 
-                // 旧版本化文件: mmd_engine_v*.dll / libmmd_engine_v*.so 等
-                // 同时匹配其残留临时文件: mmd_engine_v*.dll.download / .tmp
-                if (name.startsWith(baseName + "_v") && (name.endsWith(ext)
+                // 旧版本化文件（提取和下载两种模式）及其残留临时文件
+                // 匹配: mmd_engine_v*.dll, mmd_engine-windows-x64_v*.dll 等
+                if (name.startsWith(baseName) && name.contains("_v") && (name.endsWith(ext)
                         || name.endsWith(ext + ".download") || name.endsWith(ext + ".tmp"))) {
                     shouldDelete = true;
                 }
@@ -369,7 +369,7 @@ public class NativeFunc {
             }
         }
 
-        File downloaded = downloadNativeLibrary("libmmd_engine-android-arm64.so", soFileName);
+        File downloaded = downloadNativeLibrary("libmmd_engine-android-arm64.so");
         if (downloaded != null) {
             try {
                 logger.info("[Android] 策略5: 尝试加载下载的库 " + downloaded.getAbsolutePath());
@@ -382,7 +382,7 @@ public class NativeFunc {
         }
 
         throw new UnsatisfiedLinkError("[Android] 无法加载原生库 libmmd_engine.so，所有策略均失败。" +
-            "请检查日志获取详细信息，或从 " + RELEASE_BASE_URL + " 手动下载 libmmd_engine-android-arm64.so");
+            "请检查日志获取详细信息，或从 " + RELEASE_BASE_URL + " 手动下载 " + getVersionedFileName("libmmd_engine-android-arm64.so"));
     }
 
     private void Init() {
@@ -430,7 +430,7 @@ public class NativeFunc {
         }
         
         // 尽力清理旧版本库文件和遗留辅助文件（失败不影响正常运行）
-        cleanupOldLibraries(fileName);
+        cleanupOldLibraries(fileName, downloadFileName);
         
         // 1. 优先从模组内置资源提取（确保版本一致）
         File extracted = extractNativeLibrary(resourcePath, fileName);
@@ -445,7 +445,7 @@ public class NativeFunc {
         }
         
         // 2. 内置资源不可用时，从 GitHub Release 自动下载
-        File downloaded = downloadNativeLibrary(downloadFileName, fileName);
+        File downloaded = downloadNativeLibrary(downloadFileName);
         if (downloaded != null) {
             try {
                 logger.info("尝试加载下载的库: " + downloaded.getAbsolutePath() + " (" + downloaded.length() + " bytes)");
