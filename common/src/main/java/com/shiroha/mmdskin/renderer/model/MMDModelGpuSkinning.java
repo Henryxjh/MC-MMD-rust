@@ -184,6 +184,31 @@ public class MMDModelGpuSkinning implements IMMDModel {
             return null;
         }
         
+        MMDModelGpuSkinning result = createFromHandle(model, modelDir);
+        if (result == null) {
+            // createFromHandle 不再负责删除句柄，同步调用路径需自行清理
+            nf.DeleteModel(model);
+        }
+        return result;
+    }
+    
+    /**
+     * 从已加载的模型句柄创建渲染实例（Phase 2：GL 资源创建，必须在渲染线程调用）
+     * Phase 1（nf.LoadModelPMX/PMD）已在后台线程完成
+     */
+    public static MMDModelGpuSkinning createFromHandle(long model, String modelDir) {
+        if (nf == null) nf = NativeFunc.GetInst();
+        
+        // 初始化 Compute Shader（懒加载，全局共享）
+        if (computeShader == null) {
+            computeShader = new SkinningComputeShader();
+            if (!computeShader.init()) {
+                logger.error("蒙皮 Compute Shader 初始化失败，回退到 CPU 蒙皮");
+                nf.DeleteModel(model);
+                return null;
+            }
+        }
+        
         // 资源追踪变量（用于异常时清理）
         int vao = 0, indexVbo = 0, posVbo = 0, norVbo = 0, uv0Vbo = 0;
         int boneIdxVbo = 0, boneWgtVbo = 0, colorVbo = 0, uv1Vbo = 0, uv2Vbo = 0;
@@ -237,9 +262,7 @@ public class MMDModelGpuSkinning implements IMMDModel {
             int indexSize = indexCount * indexElementSize;
             long indexData = nf.GetIndices(model);
             ByteBuffer indexBuffer = ByteBuffer.allocateDirect(indexSize);
-            for (int i = 0; i < indexSize; ++i) {
-                indexBuffer.put(nf.ReadByte(indexData, i));
-            }
+            nf.CopyDataToByteBuffer(indexBuffer, indexData, indexSize);
             indexBuffer.position(0);
             GL46C.glBindBuffer(GL46C.GL_ELEMENT_ARRAY_BUFFER, indexVbo);
             GL46C.glBufferData(GL46C.GL_ELEMENT_ARRAY_BUFFER, indexBuffer, GL46C.GL_STATIC_DRAW);
@@ -405,7 +428,7 @@ public class MMDModelGpuSkinning implements IMMDModel {
             // 初始化材质 Morph 结果缓冲区
             int matMorphCount = nf.GetMaterialMorphResultCount(model);
             if (matMorphCount > 0) {
-                int floatCount = matMorphCount * 28;
+                int floatCount = matMorphCount * 56;
                 matMorphResultsBuf = MemoryUtil.memAllocFloat(floatCount);
                 matMorphResultsByteBuf = MemoryUtil.memAlloc(floatCount * 4);
                 matMorphResultsByteBuf.order(ByteOrder.LITTLE_ENDIAN);
@@ -475,11 +498,10 @@ public class MMDModelGpuSkinning implements IMMDModel {
             return result;
             
         } catch (Exception e) {
-            // 异常时清理所有已分配的资源
+            // 异常时清理所有已分配的 GL/内存资源
+            // 注意：不清理模型句柄（model），由调用者负责清理，
+            // 避免 RenderModeManager 多工厂回退时 use-after-free
             logger.error("GPU 蒙皮模型创建失败，清理资源: {}", e.getMessage());
-            
-            // 清理原生模型
-            nf.DeleteModel(model);
             
             // 清理 GL 资源
             if (vao > 0) GL46C.glDeleteVertexArrays(vao);
@@ -735,12 +757,17 @@ public class MMDModelGpuSkinning implements IMMDModel {
         updateLocation(shaderProgram);
         
         // === UV2 和 Color：所有顶点值相同，使用常量顶点属性（避免逐顶点循环和缓冲区上传）===
+        boolean irisActive = IrisCompat.isIrisShaderActive();
         int blockBrightness = 16 * blockLight;
-        int skyBrightness = Math.round((15.0f - skyDarken) * (skyLight / 15.0f) * 16);
+        // Iris 兼容：UV2 不应包含 skyDarken，Iris 的光照管线会自行处理昼夜变化
+        int skyBrightness = irisActive ? (16 * skyLight) : Math.round((15.0f - skyDarken) * (skyLight / 15.0f) * 16);
         if (uv2Location != -1) GL46C.glVertexAttribI4i(uv2Location, blockBrightness, skyBrightness, 0, 0);
         if (I_uv2Location != -1) GL46C.glVertexAttribI4i(I_uv2Location, blockBrightness, skyBrightness, 0, 0);
-        if (colorLocation != -1) GL46C.glVertexAttrib4f(colorLocation, lightIntensity, lightIntensity, lightIntensity, 1.0f);
-        if (I_colorLocation != -1) GL46C.glVertexAttrib4f(I_colorLocation, lightIntensity, lightIntensity, lightIntensity, 1.0f);
+        // Iris 兼容：Color 应为白色，让 Iris 的 G-buffer 管线完全控制光照；
+        // 否则 lightIntensity 预乘后会与 Iris 自身光照叠加导致夜间过暗
+        float colorFactor = irisActive ? 1.0f : lightIntensity;
+        if (colorLocation != -1) GL46C.glVertexAttrib4f(colorLocation, colorFactor, colorFactor, colorFactor, 1.0f);
+        if (I_colorLocation != -1) GL46C.glVertexAttrib4f(I_colorLocation, colorFactor, colorFactor, colorFactor, 1.0f);
         
         // 绑定顶点属性（标准名称）
         if (positionLocation != -1) {
@@ -841,7 +868,8 @@ public class MMDModelGpuSkinning implements IMMDModel {
             for (long i = 0; i < subMeshCount; ++i) {
                 int materialID = nf.GetSubMeshMaterialID(model, i);
                 if (!nf.IsMaterialVisible(model, materialID)) continue;
-                if (nf.GetMaterialAlpha(model, materialID) * getMaterialMorphAlpha(materialID) < 0.001f) continue;
+                float edgeAlpha = nf.GetMaterialAlpha(model, materialID);
+                if (getEffectiveMaterialAlpha(materialID, edgeAlpha) < 0.001f) continue;
                 
                 long startPos = (long) nf.GetSubMeshBeginIndex(model, i) * indexElementSize;
                 int count = nf.GetSubMeshVertexCount(model, i);
@@ -914,9 +942,8 @@ public class MMDModelGpuSkinning implements IMMDModel {
             if (!nf.IsMaterialVisible(model, materialID)) continue;
             
             float alpha = nf.GetMaterialAlpha(model, materialID);
-            // 应用材质 Morph 对 alpha 的调制
-            float morphAlpha = getMaterialMorphAlpha(materialID);
-            if (alpha * morphAlpha < 0.001f) continue;
+            // 应用材质 Morph 对 alpha 的调制（final = base * mul + add）
+            if (getEffectiveMaterialAlpha(materialID, alpha) < 0.001f) continue;
             
             if (nf.GetMaterialBothFace(model, materialID)) {
                 RenderSystem.disableCull();
@@ -924,11 +951,14 @@ public class MMDModelGpuSkinning implements IMMDModel {
                 RenderSystem.enableCull();
             }
             
+            int texId;
             if (mats[materialID].tex == 0) {
-                RenderSystem.setShaderTexture(0, MCinstance.getTextureManager().getTexture(TextureManager.INTENTIONAL_MISSING_TEXTURE).getId());
+                texId = MCinstance.getTextureManager().getTexture(TextureManager.INTENTIONAL_MISSING_TEXTURE).getId();
             } else {
-                RenderSystem.setShaderTexture(0, mats[materialID].tex);
+                texId = mats[materialID].tex;
             }
+            RenderSystem.setShaderTexture(0, texId);
+            GL46C.glBindTexture(GL46C.GL_TEXTURE_2D, texId);
             
             long startPos = (long) nf.GetSubMeshBeginIndex(model, i) * indexElementSize;
             int count = nf.GetSubMeshVertexCount(model, i);
@@ -1047,17 +1077,17 @@ public class MMDModelGpuSkinning implements IMMDModel {
     }
     
     /**
-     * 获取指定材质的 Morph diffuse alpha 乘数
-     * 用于渲染时调制材质透明度
+     * 计算材质经 Morph 变形后的有效 alpha
+     * 布局：每材质 56 float = mul(28) + add(28)，diffuse.w 在各组偏移 3
+     * 计算：effective = baseAlpha * mul + add
      */
-    private float getMaterialMorphAlpha(int materialIndex) {
-        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return 1.0f;
-        // diffuse.w 位于每材质 28 float 块的第 3 个位置（index 3）
-        int offset = materialIndex * 28 + 3;
-        if (offset < materialMorphResultsBuffer.capacity()) {
-            return materialMorphResultsBuffer.get(offset);
-        }
-        return 1.0f;
+    private float getEffectiveMaterialAlpha(int materialIndex, float baseAlpha) {
+        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return baseAlpha;
+        int mulOffset = materialIndex * 56 + 3;
+        int addOffset = materialIndex * 56 + 28 + 3;
+        float mulAlpha = (mulOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(mulOffset) : 1.0f;
+        float addAlpha = (addOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(addOffset) : 0.0f;
+        return baseAlpha * mulAlpha + addAlpha;
     }
     
     /**

@@ -267,6 +267,11 @@ public final class MmdSkinConfig implements ConfigManager.IConfigProvider {
     }
     
     @Override
+    public boolean isPhysicsBustClampInward() {
+        return data.physicsBustClampInward;
+    }
+    
+    @Override
     public boolean isPhysicsJointsEnabled() {
         return data.physicsJointsEnabled;
     }
@@ -274,5 +279,10 @@ public final class MmdSkinConfig implements ConfigManager.IConfigProvider {
     @Override
     public boolean isPhysicsDebugLog() {
         return data.physicsDebugLog;
+    }
+    
+    @Override
+    public boolean isFirstPersonModelEnabled() {
+        return data.firstPersonModelEnabled;
     }
 }

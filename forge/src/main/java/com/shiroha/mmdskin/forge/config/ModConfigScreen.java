@@ -47,6 +47,15 @@ public class ModConfigScreen {
             .setSaveConsumer(value -> data.mmdShaderEnabled = value)
             .build());
         
+        renderCategory.addEntry(entryBuilder
+            .startBooleanToggle(
+                Component.translatable("gui.mmdskin.mod_settings.first_person_model"),
+                data.firstPersonModelEnabled)
+            .setDefaultValue(false)
+            .setTooltip(Component.translatable("gui.mmdskin.mod_settings.first_person_model.tooltip"))
+            .setSaveConsumer(value -> data.firstPersonModelEnabled = value)
+            .build());
+        
         // 性能设置分类
         ConfigCategory performanceCategory = builder.getOrCreateCategory(
             Component.translatable("gui.mmdskin.mod_settings.category.performance"));
@@ -416,8 +425,8 @@ public class ModConfigScreen {
         physicsCategory.addEntry(entryBuilder
             .startIntSlider(
                 Component.translatable("gui.mmdskin.mod_settings.physics_bust_linear_stiffness"),
-                (int)(data.physicsBustLinearSpringStiffnessScale * 10), 1, 200)
-            .setDefaultValue(80)
+                (int)(data.physicsBustLinearSpringStiffnessScale * 10), 1, 500)
+            .setDefaultValue(100)
             .setTooltip(Component.translatable("gui.mmdskin.mod_settings.physics_bust_linear_stiffness.tooltip"))
             .setSaveConsumer(value -> data.physicsBustLinearSpringStiffnessScale = value / 10.0f)
             .build());
@@ -426,8 +435,8 @@ public class ModConfigScreen {
         physicsCategory.addEntry(entryBuilder
             .startIntSlider(
                 Component.translatable("gui.mmdskin.mod_settings.physics_bust_angular_stiffness"),
-                (int)(data.physicsBustAngularSpringStiffnessScale * 10), 1, 200)
-            .setDefaultValue(80)
+                (int)(data.physicsBustAngularSpringStiffnessScale * 10), 1, 500)
+            .setDefaultValue(100)
             .setTooltip(Component.translatable("gui.mmdskin.mod_settings.physics_bust_angular_stiffness.tooltip"))
             .setSaveConsumer(value -> data.physicsBustAngularSpringStiffnessScale = value / 10.0f)
             .build());
@@ -436,7 +445,7 @@ public class ModConfigScreen {
         physicsCategory.addEntry(entryBuilder
             .startIntSlider(
                 Component.translatable("gui.mmdskin.mod_settings.physics_bust_linear_spring_damping"),
-                (int)(data.physicsBustLinearSpringDampingFactor * 10), 1, 100)
+                (int)(data.physicsBustLinearSpringDampingFactor * 10), 1, 200)
             .setDefaultValue(30)
             .setTooltip(Component.translatable("gui.mmdskin.mod_settings.physics_bust_linear_spring_damping.tooltip"))
             .setSaveConsumer(value -> data.physicsBustLinearSpringDampingFactor = value / 10.0f)
@@ -446,10 +455,20 @@ public class ModConfigScreen {
         physicsCategory.addEntry(entryBuilder
             .startIntSlider(
                 Component.translatable("gui.mmdskin.mod_settings.physics_bust_angular_spring_damping"),
-                (int)(data.physicsBustAngularSpringDampingFactor * 10), 1, 100)
+                (int)(data.physicsBustAngularSpringDampingFactor * 10), 1, 200)
             .setDefaultValue(30)
             .setTooltip(Component.translatable("gui.mmdskin.mod_settings.physics_bust_angular_spring_damping.tooltip"))
             .setSaveConsumer(value -> data.physicsBustAngularSpringDampingFactor = value / 10.0f)
+            .build());
+        
+        // 胸部防凹陷
+        physicsCategory.addEntry(entryBuilder
+            .startBooleanToggle(
+                Component.translatable("gui.mmdskin.mod_settings.physics_bust_clamp_inward"),
+                data.physicsBustClampInward)
+            .setDefaultValue(true)
+            .setTooltip(Component.translatable("gui.mmdskin.mod_settings.physics_bust_clamp_inward.tooltip"))
+            .setSaveConsumer(value -> data.physicsBustClampInward = value)
             .build());
         
         // ==================== 调试设置 ====================
@@ -494,6 +513,7 @@ public class ModConfigScreen {
                     data.physicsBustAngularSpringStiffnessScale,
                     data.physicsBustLinearSpringDampingFactor,
                     data.physicsBustAngularSpringDampingFactor,
+                    data.physicsBustClampInward,
                     data.physicsJointsEnabled,
                     data.physicsDebugLog
                 );

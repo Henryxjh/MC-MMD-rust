@@ -8,7 +8,10 @@
   "client": [
     "FabricPlayerRendererMixin",
     "CameraMixin",
-    "GameRendererMixin"
+    "GameRendererMixin",
+    "KeyMappingAccessor",
+    "LevelRendererMixin",
+    "ItemInHandRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

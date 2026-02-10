@@ -70,8 +70,6 @@ pub struct MMDRigidBody {
     pub restitution: f32,
     /// 摩擦力
     pub friction: f32,
-    /// 是否为胸部刚体（通过名称自动识别）
-    pub is_bust: bool,
     /// 是否为头发刚体（通过名称自动识别）
     pub is_hair: bool,
 }
@@ -125,7 +123,6 @@ impl MMDRigidBody {
         // 创建初始 Isometry
         let initial_transform = mat4_to_isometry(rb_mat);
         
-        let is_bust = is_bust_name(&pmx_rb.local_name);
         let is_hair = is_hair_name(&pmx_rb.local_name);
         
         Self {
@@ -145,7 +142,6 @@ impl MMDRigidBody {
             angular_damping: pmx_rb.rotation_attenuation,
             restitution: pmx_rb.repulsion,
             friction: pmx_rb.friction,
-            is_bust,
             is_hair,
         }
     }
@@ -161,15 +157,8 @@ impl MMDRigidBody {
             }
         };
         
-        // 根据是否为胸部刚体选用不同的参数组
-        let (lin_damp_scale, ang_damp_scale) = if self.is_bust {
-            (config.bust_linear_damping_scale, config.bust_angular_damping_scale)
-        } else {
-            (config.linear_damping_scale, config.angular_damping_scale)
-        };
-        
-        let linear_damping = self.linear_damping * lin_damp_scale;
-        let angular_damping = self.angular_damping * ang_damp_scale;
+        let linear_damping = self.linear_damping * config.linear_damping_scale;
+        let angular_damping = self.angular_damping * config.angular_damping_scale;
         
         RigidBodyBuilder::new(rb_type)
             .position(self.initial_transform)
@@ -212,8 +201,7 @@ impl MMDRigidBody {
         let builder = ColliderBuilder::new(shape)
             .restitution(self.restitution);
         
-        // 设置质量（根据部位应用不同缩放）
-        let mass_scale = if self.is_bust { config.bust_mass_scale } else { config.mass_scale };
+        let mass_scale = config.mass_scale;
         let builder = if self.body_type == RigidBodyType::Kinematic {
             builder.density(0.0)
         } else {
@@ -254,10 +242,6 @@ impl MMDRigidBody {
         result
     }
     
-    /// 重置刚体变换到初始状态
-    pub fn reset_transform(&mut self) {
-        // initial_transform 已在创建时保存
-    }
 }
 
 /// InvZ 变换：将 MMD 左手坐标系转换为右手坐标系
@@ -271,9 +255,13 @@ pub fn inv_z(m: Mat4) -> Mat4 {
 /// 将 glam Mat4 转换为 Rapier Isometry
 pub fn mat4_to_isometry(mat: Mat4) -> Pose {
     let (_, rotation, translation) = mat.to_scale_rotation_translation();
+    // 钳位 w 到 [-1, 1]，防止浮点误差导致 acos 返回 NaN
+    let w = rotation.w.clamp(-1.0, 1.0);
+    let sin_half = (1.0 - w * w).sqrt().max(1e-6);
+    let angle = w.acos() * 2.0;
     Isometry::new(
         vector![translation.x, translation.y, translation.z],
-        vector![rotation.x, rotation.y, rotation.z] * rotation.w.acos() * 2.0 / (1.0 - rotation.w * rotation.w).sqrt().max(1e-6)
+        vector![rotation.x, rotation.y, rotation.z] * angle / sin_half
     )
 }
 
@@ -300,21 +288,6 @@ pub fn vec3_to_rapier(v: Vec3) -> Vector<Real> {
 #[allow(dead_code)]
 pub fn rapier_to_vec3(v: Vector<Real>) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
-}
-
-/// 判断刚体名称是否为胸部相关
-/// 
-/// MMD 模型中胸部刚体常见命名：
-/// - 日文：おっぱ、乳、胸
-/// - 英文：bust、Bust、breast、Breast、oppai
-fn is_bust_name(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    lower.contains("おっぱ")
-        || lower.contains("乳")
-        || lower.contains("胸")
-        || lower.contains("bust")
-        || lower.contains("breast")
-        || lower.contains("oppai")
 }
 
 /// 判断刚体名称是否为头发相关

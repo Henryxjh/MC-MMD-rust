@@ -240,12 +240,25 @@ public class ConfigManager {
         return provider != null ? provider.getPhysicsBustAngularSpringDampingFactor() : 1.0f;
     }
     
+    public static boolean isPhysicsBustClampInward() {
+        return provider != null ? provider.isPhysicsBustClampInward() : true;
+    }
+    
     public static boolean isPhysicsJointsEnabled() {
         return provider != null ? provider.isPhysicsJointsEnabled() : true;
     }
     
     public static boolean isPhysicsDebugLog() {
         return provider != null ? provider.isPhysicsDebugLog() : false;
+    }
+    
+    // ==================== 第一人称模型配置 ====================
+    
+    /**
+     * 获取第一人称模型显示启用状态
+     */
+    public static boolean isFirstPersonModelEnabled() {
+        return provider != null ? provider.isFirstPersonModelEnabled() : false;
     }
     
     /**
@@ -372,10 +385,16 @@ public class ConfigManager {
         /** 胸部角度弹簧阻尼系数（默认 1.0） */
         default float getPhysicsBustAngularSpringDampingFactor() { return 1.0f; }
         
+        /** 胸部防凹陷修正（默认 true） */
+        default boolean isPhysicsBustClampInward() { return true; }
+        
         /** 是否启用关节（默认 true） */
         default boolean isPhysicsJointsEnabled() { return true; }
         
         /** 是否输出调试日志（默认 false） */
         default boolean isPhysicsDebugLog() { return false; }
+        
+        /** 第一人称模型显示是否启用（默认 false） */
+        default boolean isFirstPersonModelEnabled() { return false; }
     }
 }

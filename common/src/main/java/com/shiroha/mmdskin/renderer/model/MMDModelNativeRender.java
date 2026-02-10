@@ -86,13 +86,18 @@ public class MMDModelNativeRender implements IMMDModel {
         materialMorphResultsBuffer.flip();
     }
     
-    private float getMaterialMorphAlpha(int materialIndex) {
-        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return 1.0f;
-        int offset = materialIndex * 28 + 3;
-        if (offset < materialMorphResultsBuffer.capacity()) {
-            return materialMorphResultsBuffer.get(offset);
-        }
-        return 1.0f;
+    /**
+     * 计算材质经 Morph 变形后的有效 alpha
+     * 布局：每材质 56 float = mul(28) + add(28)，diffuse.w 在各组偏移 3
+     * 计算：effective = baseAlpha * mul + add
+     */
+    private float getEffectiveMaterialAlpha(int materialIndex, float baseAlpha) {
+        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return baseAlpha;
+        int mulOffset = materialIndex * 56 + 3;
+        int addOffset = materialIndex * 56 + 28 + 3;
+        float mulAlpha = (mulOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(mulOffset) : 1.0f;
+        float addAlpha = (addOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(addOffset) : 0.0f;
+        return baseAlpha * mulAlpha + addAlpha;
     }
     
     public static void Init(NativeFunc nativeFunc) {
@@ -109,7 +114,31 @@ public class MMDModelNativeRender implements IMMDModel {
                 logger.error("加载模型失败: {}", pmxPath);
                 return null;
             }
-            
+            MMDModelNativeRender result = createFromHandle(model, modelDirectory);
+            if (result == null) {
+                nf.DeleteModel(model);
+            }
+            return result;
+        } catch (Exception e) {
+            logger.error("加载模型异常", e);
+            return null;
+        }
+    }
+    
+    /**
+     * 从已加载的模型句柄创建渲染实例（Phase 2：GL 资源创建，必须在渲染线程调用）
+     * Phase 1（nf.LoadModelPMX）已在后台线程完成
+     */
+    public static MMDModelNativeRender createFromHandle(long model, String modelDirectory) {
+        if (nf == null) nf = NativeFunc.GetInst();
+        
+        // 资源追踪变量（用于异常时清理）
+        ByteBuffer posBuffer = null, norBuffer = null, uv0Buffer = null;
+        VertexBuffer[] subMeshVertexBuffers = null;
+        FloatBuffer matMorphResultsBuf = null;
+        ByteBuffer matMorphResultsByteBuf = null;
+        
+        try {
             int vertexCount = (int) nf.GetVertexCount(model);
             
             // 分配缓冲区
@@ -117,9 +146,9 @@ public class MMDModelNativeRender implements IMMDModel {
             int norSize = vertexCount * 12;
             int uvSize = vertexCount * 8;
             
-            ByteBuffer posBuffer = MemoryUtil.memAlloc(posSize);
-            ByteBuffer norBuffer = MemoryUtil.memAlloc(norSize);
-            ByteBuffer uv0Buffer = MemoryUtil.memAlloc(uvSize);
+            posBuffer = MemoryUtil.memAlloc(posSize);
+            norBuffer = MemoryUtil.memAlloc(norSize);
+            uv0Buffer = MemoryUtil.memAlloc(uvSize);
             
             // 加载索引
             long idxCount = nf.GetIndexCount(model);
@@ -148,8 +177,7 @@ public class MMDModelNativeRender implements IMMDModel {
                 mats[i] = new Material();
                 String texPath = nf.GetMaterialTex(model, i);
                 if (texPath != null && !texPath.isEmpty()) {
-                    String fullPath = modelDirectory + "/" + texPath;
-                    MMDTextureManager.Texture tex = MMDTextureManager.GetTexture(fullPath);
+                    MMDTextureManager.Texture tex = MMDTextureManager.GetTexture(texPath);
                     if (tex != null) {
                         mats[i].tex = tex.tex;
                         mats[i].hasAlpha = tex.hasAlpha;
@@ -159,7 +187,7 @@ public class MMDModelNativeRender implements IMMDModel {
             
             // 创建子网格 VertexBuffer
             long subMeshCount = nf.GetSubMeshCount(model);
-            VertexBuffer[] subMeshVertexBuffers = new VertexBuffer[(int) subMeshCount];
+            subMeshVertexBuffers = new VertexBuffer[(int) subMeshCount];
             for (int i = 0; i < subMeshCount; i++) {
                 subMeshVertexBuffers[i] = new VertexBuffer(VertexBuffer.Usage.DYNAMIC);
             }
@@ -181,11 +209,13 @@ public class MMDModelNativeRender implements IMMDModel {
             // 初始化材质 Morph 结果缓冲区
             int matMorphCount = nf.GetMaterialMorphResultCount(model);
             if (matMorphCount > 0) {
-                int floatCount = matMorphCount * 28;
+                int floatCount = matMorphCount * 56;
                 result.materialMorphResultCount = matMorphCount;
-                result.materialMorphResultsBuffer = MemoryUtil.memAllocFloat(floatCount);
-                result.materialMorphResultsByteBuffer = MemoryUtil.memAlloc(floatCount * 4);
-                result.materialMorphResultsByteBuffer.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                matMorphResultsBuf = MemoryUtil.memAllocFloat(floatCount);
+                matMorphResultsByteBuf = MemoryUtil.memAlloc(floatCount * 4);
+                matMorphResultsByteBuf.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                result.materialMorphResultsBuffer = matMorphResultsBuf;
+                result.materialMorphResultsByteBuffer = matMorphResultsByteBuf;
             }
             
             // 启用自动眨眼
@@ -195,7 +225,22 @@ public class MMDModelNativeRender implements IMMDModel {
             return result;
             
         } catch (Exception e) {
-            logger.error("加载模型异常", e);
+            logger.error("原生渲染模型创建失败，清理资源", e);
+            
+            // 清理 MemoryUtil 分配的缓冲区
+            if (posBuffer != null) MemoryUtil.memFree(posBuffer);
+            if (norBuffer != null) MemoryUtil.memFree(norBuffer);
+            if (uv0Buffer != null) MemoryUtil.memFree(uv0Buffer);
+            if (matMorphResultsBuf != null) MemoryUtil.memFree(matMorphResultsBuf);
+            if (matMorphResultsByteBuf != null) MemoryUtil.memFree(matMorphResultsByteBuf);
+            
+            // 清理 VertexBuffer
+            if (subMeshVertexBuffers != null) {
+                for (VertexBuffer vb : subMeshVertexBuffers) {
+                    if (vb != null) vb.close();
+                }
+            }
+            
             return null;
         }
     }
@@ -341,8 +386,7 @@ public class MMDModelNativeRender implements IMMDModel {
             
             if (!nf.IsMaterialVisible(model, materialID)) continue;
             float alpha = nf.GetMaterialAlpha(model, materialID);
-            float morphAlpha = getMaterialMorphAlpha(materialID);
-            if (alpha * morphAlpha < 0.001f) continue;
+            if (getEffectiveMaterialAlpha(materialID, alpha) < 0.001f) continue;
             
             int startIndex = nf.GetSubMeshBeginIndex(model, i);
             int vertCount = nf.GetSubMeshVertexCount(model, i);
