@@ -142,9 +142,7 @@ pub struct MmdModel {
     first_person_enabled: bool,
     /// 头部骨骼索引缓存（模型加载后计算一次）
     head_bone_index: Option<usize>,
-    /// 头部骨骼及其所有子骨骼的索引集合
-    head_bone_descendants: Vec<usize>,
-    /// 每个子网格是否属于头部（基于骨骼权重自动检测）
+    /// 每个子网格是否属于头部（基于顶点位置自动检测）
     head_submesh_flags: Vec<bool>,
     /// 头部检测是否已初始化
     head_detection_initialized: bool,
@@ -231,7 +229,6 @@ impl MmdModel {
             is_transitioning: false,
             first_person_enabled: false,
             head_bone_index: None,
-            head_bone_descendants: Vec::new(),
             head_submesh_flags: Vec::new(),
             head_detection_initialized: false,
             material_visible_backup: Vec::new(),
@@ -313,14 +310,14 @@ impl MmdModel {
     // ========== 第一人称模式 ==========
     
     /// 初始化头部检测（模型加载后调用一次）
-    /// 查找头部骨骼及其所有后代骨骼，然后根据顶点权重判断哪些子网格属于头部
+    /// 基于顶点位置判断：颈部骨骼 Y 坐标以上的子网格标记为头部
     pub fn init_head_detection(&mut self) {
         if self.head_detection_initialized {
             return;
         }
         self.head_detection_initialized = true;
         
-        // 1. 查找头部骨骼
+        // 1. 查找头部骨骼（眼睛骨骼 fallback 用）
         let head_names = ["頭", "head", "Head", "あたま"];
         self.head_bone_index = None;
         for name in &head_names {
@@ -330,51 +327,37 @@ impl MmdModel {
             }
         }
         
-        let head_idx = match self.head_bone_index {
-            Some(idx) => idx,
+        // 2. 确定颈部分界线 Y 坐标（优先颈部骨骼，fallback 到头部骨骼）
+        let neck_names = ["首", "neck", "Neck"];
+        let mut neck_y: Option<f32> = None;
+        for name in &neck_names {
+            if let Some(idx) = self.bone_manager.find_bone_by_name(name) {
+                if let Some(bone) = self.bone_manager.get_bone(idx) {
+                    neck_y = Some(bone.initial_position.y);
+                    log::info!("第一人称分界线: 使用颈部骨骼 '{}' Y={:.2}", name, bone.initial_position.y);
+                }
+                break;
+            }
+        }
+        if neck_y.is_none() {
+            if let Some(idx) = self.head_bone_index {
+                if let Some(bone) = self.bone_manager.get_bone(idx) {
+                    neck_y = Some(bone.initial_position.y);
+                    log::info!("第一人称分界线: 颈部骨骼未找到，fallback 到头部骨骼 Y={:.2}", bone.initial_position.y);
+                }
+            }
+        }
+        
+        let cutoff_y = match neck_y {
+            Some(y) => y,
             None => {
-                log::warn!("头部骨骼未找到，第一人称头部隐藏不可用");
+                log::warn!("颈部/头部骨骼均未找到，第一人称头部隐藏不可用");
                 self.head_submesh_flags = vec![false; self.submeshes.len()];
                 return;
             }
         };
         
-        // 2. 收集头部骨骼及其所有后代骨骼
-        let bone_count = self.bone_manager.bone_count();
-        let mut is_head_bone = vec![false; bone_count];
-        is_head_bone[head_idx] = true;
-        
-        // 多轮传播标记后代骨骼（不依赖索引顺序）
-        loop {
-            let mut changed = false;
-            for i in 0..bone_count {
-                if is_head_bone[i] {
-                    continue;
-                }
-                if let Some(bone) = self.bone_manager.get_bone(i) {
-                    let parent = bone.parent_index;
-                    if parent >= 0 && (parent as usize) < bone_count && is_head_bone[parent as usize] {
-                        is_head_bone[i] = true;
-                        changed = true;
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        
-        self.head_bone_descendants = is_head_bone.iter()
-            .enumerate()
-            .filter(|(_, &is_head)| is_head)
-            .map(|(i, _)| i)
-            .collect();
-        
-        log::info!("头部骨骼检测: 头部骨骼索引={}, 后代骨骼数={}", 
-            head_idx, self.head_bone_descendants.len());
-        
-        // 3. 对每个子网格，计算头部骨骼权重占比
-        let head_bone_set: std::collections::HashSet<usize> = self.head_bone_descendants.iter().copied().collect();
+        // 3. 对每个子网格，按顶点位置判断是否在脖子以上
         self.head_submesh_flags = Vec::with_capacity(self.submeshes.len());
         
         for submesh in &self.submeshes {
@@ -386,8 +369,8 @@ impl MmdModel {
                 continue;
             }
             
-            let mut head_weight_sum: f32 = 0.0;
-            let mut total_weight_sum: f32 = 0.0;
+            let mut above_count: usize = 0;
+            let mut total_count: usize = 0;
             
             for idx_offset in 0..count {
                 let index_pos = begin + idx_offset;
@@ -395,61 +378,29 @@ impl MmdModel {
                     break;
                 }
                 let vertex_idx = self.indices[index_pos] as usize;
-                if vertex_idx >= self.weights.len() {
+                if vertex_idx >= self.vertices.len() {
                     continue;
                 }
                 
-                let weight = &self.weights[vertex_idx];
-                match weight {
-                    VertexWeight::Bdef1 { bone } => {
-                        total_weight_sum += 1.0;
-                        if head_bone_set.contains(&(*bone as usize)) {
-                            head_weight_sum += 1.0;
-                        }
-                    }
-                    VertexWeight::Bdef2 { bones, weight: w } => {
-                        total_weight_sum += 1.0;
-                        let mut hw: f32 = 0.0;
-                        if head_bone_set.contains(&(bones[0] as usize)) { hw += *w; }
-                        if head_bone_set.contains(&(bones[1] as usize)) { hw += 1.0 - *w; }
-                        head_weight_sum += hw;
-                    }
-                    VertexWeight::Bdef4 { bones, weights } => {
-                        total_weight_sum += 1.0;
-                        let mut hw: f32 = 0.0;
-                        for j in 0..4 {
-                            if head_bone_set.contains(&(bones[j] as usize)) { hw += weights[j]; }
-                        }
-                        head_weight_sum += hw;
-                    }
-                    VertexWeight::Sdef { bones, weight: w, .. } => {
-                        total_weight_sum += 1.0;
-                        let mut hw: f32 = 0.0;
-                        if head_bone_set.contains(&(bones[0] as usize)) { hw += *w; }
-                        if head_bone_set.contains(&(bones[1] as usize)) { hw += 1.0 - *w; }
-                        head_weight_sum += hw;
-                    }
-                    VertexWeight::Qdef { bones, weights } => {
-                        total_weight_sum += 1.0;
-                        let mut hw: f32 = 0.0;
-                        for j in 0..4 {
-                            if head_bone_set.contains(&(bones[j] as usize)) { hw += weights[j]; }
-                        }
-                        head_weight_sum += hw;
-                    }
+                total_count += 1;
+                if self.vertices[vertex_idx].position.y >= cutoff_y {
+                    above_count += 1;
                 }
             }
             
-            // 超过 50% 权重属于头部骨骼则标记为头部子网格
-            let ratio = if total_weight_sum > 0.0 { head_weight_sum / total_weight_sum } else { 0.0 };
+            let ratio = if total_count > 0 { above_count as f32 / total_count as f32 } else { 0.0 };
             let is_head = ratio > 0.5;
             self.head_submesh_flags.push(is_head);
             
+            let mat_name = self.materials.get(submesh.material_id as usize)
+                .map(|m| m.name.as_str())
+                .unwrap_or("?");
             if is_head {
-                let mat_name = self.materials.get(submesh.material_id as usize)
-                    .map(|m| m.name.as_str())
-                    .unwrap_or("?");
-                log::info!("  头部子网格: material={}, 头部权重占比={:.1}%", mat_name, ratio * 100.0);
+                log::info!("  [HEAD] submesh={}, material={}, 脖子以上顶点={:.1}%", 
+                    self.head_submesh_flags.len() - 1, mat_name, ratio * 100.0);
+            } else if ratio > 0.1 {
+                log::info!("  [BODY] submesh={}, material={}, 脖子以上顶点={:.1}%", 
+                    self.head_submesh_flags.len() - 1, mat_name, ratio * 100.0);
             }
         }
         
@@ -530,14 +481,23 @@ impl MmdModel {
             }
             
             // 仅隐藏只被头部子网格使用的材质
+            let mut hidden_count = 0;
             for (i, submesh) in self.submeshes.iter().enumerate() {
                 if i < self.head_submesh_flags.len() && self.head_submesh_flags[i] {
                     let mat_id = submesh.material_id as usize;
+                    let mat_name = self.materials.get(mat_id)
+                        .map(|m| m.name.as_str()).unwrap_or("?");
                     if mat_id < self.material_visible.len() && !body_material_ids.contains(&mat_id) {
                         self.material_visible[mat_id] = false;
+                        hidden_count += 1;
+                        log::info!("  第一人称隐藏材质: [{}] {}", mat_id, mat_name);
+                    } else if body_material_ids.contains(&mat_id) {
+                        log::info!("  第一人称跳过共享材质: [{}] {} (身体也在使用)", mat_id, mat_name);
                     }
                 }
             }
+            log::info!("第一人称模式启用: 隐藏 {} 个材质, 头部子网格 {} 个", 
+                hidden_count, self.head_submesh_flags.iter().filter(|&&x| x).count());
         } else {
             // 恢复材质可见性
             if !self.material_visible_backup.is_empty() {

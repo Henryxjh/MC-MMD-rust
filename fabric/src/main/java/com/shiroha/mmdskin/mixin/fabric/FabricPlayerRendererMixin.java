@@ -5,6 +5,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.shiroha.mmdskin.MmdSkinClient;
 import com.shiroha.mmdskin.NativeFunc;
 import com.shiroha.mmdskin.renderer.animation.AnimationStateManager;
+import com.shiroha.mmdskin.config.ModelConfigManager;
 import com.shiroha.mmdskin.renderer.core.FirstPersonManager;
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.RenderContext;
@@ -84,7 +85,8 @@ public abstract class FabricPlayerRendererMixin extends LivingEntityRenderer<Abs
         float[] size = getModelSize(modelWithData);
         
         // 第一人称模式管理（阶段一：管理头部隐藏状态，在 render 之前）
-        FirstPersonManager.preRender(NativeFunc.GetInst(), model.GetModelLong(), size[0], isLocalPlayer);
+        float combinedScale = size[0] * ModelConfigManager.getConfig(selectedModel).modelScale;
+        FirstPersonManager.preRender(NativeFunc.GetInst(), model.GetModelLong(), combinedScale, isLocalPlayer);
         boolean isFirstPerson = isLocalPlayer && FirstPersonManager.isActive();
         
         // 更新动画状态（委托给 AnimationStateManager）

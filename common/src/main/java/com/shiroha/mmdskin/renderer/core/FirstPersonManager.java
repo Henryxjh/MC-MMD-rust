@@ -53,7 +53,7 @@ public final class FirstPersonManager {
      * 
      * @param nf NativeFunc 实例
      * @param modelHandle 模型句柄
-     * @param modelScale 模型缩放系数（来自 model.properties 的 size）
+     * @param modelScale 组合缩放系数（model.properties size × ModelConfigData.modelScale）
      * @param isLocalPlayer 是否为本地玩家
      */
     public static void preRender(NativeFunc nf, long modelHandle, float modelScale, boolean isLocalPlayer) {
@@ -72,11 +72,15 @@ public final class FirstPersonManager {
             activeFirstPerson = shouldEnable;
             
             if (shouldEnable) {
-                cachedModelScale = modelScale;
                 logger.info("第一人称模式启用: modelScale={}", modelScale);
             } else {
                 logger.info("第一人称模式禁用");
             }
+        }
+        
+        // 始终同步缩放值，确保运行时调整缩放后相机位置跟随
+        if (shouldEnable) {
+            cachedModelScale = modelScale;
         }
     }
     

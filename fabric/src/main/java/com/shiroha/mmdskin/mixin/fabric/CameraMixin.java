@@ -5,6 +5,7 @@ import com.shiroha.mmdskin.renderer.core.FirstPersonManager;
 import net.minecraft.client.Camera;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.BlockGetter;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -48,7 +49,9 @@ public abstract class CameraMixin {
                 double py = Mth.lerp(partialTick, entity.yo, entity.getY());
                 double pz = Mth.lerp(partialTick, entity.zo, entity.getZ());
                 // 模型局部 X/Z 偏移需随玩家身体朝向旋转（与 PlayerRendererMixin 中 bodyYaw 一致）
-                float bodyYaw = Mth.rotLerp(partialTick, entity.yRotO, entity.getYRot());
+                float bodyYaw = (entity instanceof LivingEntity le)
+                    ? Mth.rotLerp(partialTick, le.yBodyRotO, le.yBodyRot)
+                    : Mth.rotLerp(partialTick, entity.yRotO, entity.getYRot());
                 float yawRad = (float) Math.toRadians(bodyYaw);
                 double sinYaw = Mth.sin(yawRad);
                 double cosYaw = Mth.cos(yawRad);
