@@ -272,6 +272,13 @@ public class MMDModelOpenGL implements IMMDModel {
         // 性能优化：uv1 是静态数据（永远是 {15, 15}），只在创建时上传一次
         GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv1BufferObject);
         GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, uv1Buffer, GL46C.GL_STATIC_DRAW);
+        // 安卓兼容：上传白色 Color VBO + 预分配 UV2 VBO
+        // 安卓 GL 翻译层（gl4es/ANGLE）对 glVertexAttrib4f 常量属性支持不完整，
+        // 导致 Color.a=0 → entity_cutout 着色器 discard → 模型全透明。改用 VBO 确保跨平台兼容。
+        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
+        GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, colorBuffer, GL46C.GL_STATIC_DRAW);
+        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
+        GL46C.glBufferData(GL46C.GL_ARRAY_BUFFER, vertexCount * 8, GL46C.GL_DYNAMIC_DRAW);
         GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, 0);
 
         MMDModelOpenGL result = new MMDModelOpenGL();
@@ -550,10 +557,18 @@ public class MMDModelOpenGL implements IMMDModel {
         }
         
         // 普通渲染模式
+        // 安卓兼容：光照强度通过 ColorModulator uniform 传递（替代 glVertexAttrib4f 常量 Color 属性）
+        // 安卓 GL 翻译层（gl4es/ANGLE）对 glVertexAttrib4f 常量属性支持不完整，
+        // 导致 Color.a=0 → entity_cutout 着色器 discard → 模型全透明
+        boolean irisActive = IrisCompat.isIrisShaderActive();
+        float colorFactor = irisActive ? 1.0f : lightIntensity;
+        RenderSystem.setShaderColor(colorFactor, colorFactor, colorFactor, 1.0f);
+        
         if(MmdSkinClient.usingMMDShader == 0){
             ShaderInstance mcShader = RenderSystem.getShader();
             if (mcShader == null) {
                 logger.debug("RenderSystem.getShader() 返回 null，跳过本帧渲染");
+                RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
                 return;
             }
             shaderProgram = mcShader.getId();
@@ -597,19 +612,45 @@ public class MMDModelOpenGL implements IMMDModel {
 
         // 性能优化：uv1 已在创建时上传，无需每帧重传
 
-        // === UV2 和 Color：所有顶点值相同，使用常量顶点属性（避免逐顶点循环和缓冲区上传）===
-        boolean irisActive = IrisCompat.isIrisShaderActive();
+        // === UV2：填充 VBO 并绑定属性（替代 glVertexAttribI4i 常量属性，安卓兼容）===
         int blockBrightness = 16 * blockLight;
         // Iris 兼容：UV2 不应包含 skyDarken，Iris 的光照管线会自行处理昼夜变化
         int skyBrightness = irisActive ? (16 * skyLight) : Math.round((15.0f - skyDarken) * (skyLight / 15.0f) * 16);
-        if (uv2Location != -1) GL46C.glVertexAttribI4i(uv2Location, blockBrightness, skyBrightness, 0, 0);
-        if (K_uv2Location != -1) GL46C.glVertexAttribI4i(K_uv2Location, blockBrightness, skyBrightness, 0, 0);
-        if (I_uv2Location != -1) GL46C.glVertexAttribI4i(I_uv2Location, blockBrightness, skyBrightness, 0, 0);
-        // Iris 兼容：Color 应为白色，让 Iris 的 G-buffer 管线完全控制光照；
-        // 否则 lightIntensity 预乘后会与 Iris 自身光照叠加导致夜间过暗
-        float colorFactor = irisActive ? 1.0f : lightIntensity;
-        if (colorLocation != -1) GL46C.glVertexAttrib4f(colorLocation, colorFactor, colorFactor, colorFactor, 1.0f);
-        if (I_colorLocation != -1) GL46C.glVertexAttrib4f(I_colorLocation, colorFactor, colorFactor, colorFactor, 1.0f);
+        uv2Buffer.clear();
+        for (int i = 0; i < vertexCount; i++) {
+            uv2Buffer.putInt(blockBrightness);
+            uv2Buffer.putInt(skyBrightness);
+        }
+        uv2Buffer.flip();
+        GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
+        GL46C.glBufferSubData(GL46C.GL_ARRAY_BUFFER, 0, uv2Buffer);
+        if (uv2Location != -1) {
+            GL46C.glEnableVertexAttribArray(uv2Location);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
+            GL46C.glVertexAttribIPointer(uv2Location, 2, GL46C.GL_INT, 0, 0);
+        }
+        if (K_uv2Location != -1) {
+            GL46C.glEnableVertexAttribArray(K_uv2Location);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
+            GL46C.glVertexAttribIPointer(K_uv2Location, 2, GL46C.GL_INT, 0, 0);
+        }
+        if (I_uv2Location != -1) {
+            GL46C.glEnableVertexAttribArray(I_uv2Location);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, uv2BufferObject);
+            GL46C.glVertexAttribIPointer(I_uv2Location, 2, GL46C.GL_INT, 0, 0);
+        }
+        // === Color：使用白色 VBO + ColorModulator uniform 传递光照（替代 glVertexAttrib4f，安卓兼容）===
+        // Color VBO 在创建时填充白色 (1,1,1,1)，光照强度已通过 setShaderColor → ColorModulator 传递
+        if (colorLocation != -1) {
+            GL46C.glEnableVertexAttribArray(colorLocation);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
+            GL46C.glVertexAttribPointer(colorLocation, 4, GL46C.GL_FLOAT, false, 0, 0);
+        }
+        if (I_colorLocation != -1) {
+            GL46C.glEnableVertexAttribArray(I_colorLocation);
+            GL46C.glBindBuffer(GL46C.GL_ARRAY_BUFFER, colorBufferObject);
+            GL46C.glVertexAttribPointer(I_colorLocation, 4, GL46C.GL_FLOAT, false, 0, 0);
+        }
 
         // === 绑定顶点属性（数据已在 VBO 中，只需设置指针）===
         if (positionLocation != -1) {
@@ -802,6 +843,7 @@ public class MMDModelOpenGL implements IMMDModel {
             currentShader.clear();
         }
         BufferUploader.reset();
+        RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
     }
 
     /**
