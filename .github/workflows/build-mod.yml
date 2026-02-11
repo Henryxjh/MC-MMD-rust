@@ -293,7 +293,7 @@ jobs:
 
       - name: Rename JARs to universal
         run: |
-          export version "git tag --sort=-creatordate | grep -e "dev.*" | head --lines 1"
+          export version="$(git tag --sort=-creatordate | grep -e "dev.*" | head --lines 1)"
           cd fabric/build/libs
           for f in mmdskin-fabric-*.jar; do
             case "$f" in *-dev*|*-sources*) continue;; esac
@@ -375,14 +375,14 @@ jobs:
 
       - name: Rename JARs to universal
         run: |
-          export version "git tag --sort=-creatordate | grep -e "dev.*" | head --lines 1"
+          export version="$(git tag --sort=-creatordate | grep -e "dev.*" | head --lines 1)"
           cd fabric/build/libs
           for f in mmdskin-fabric-*.jar; do
             case "$f" in *-dev*|*-sources*) continue;; esac
             mv "$f" "${f%.jar}-$version-universal.jar"
           done
-          cd ../../../forge/build/libs
-          for f in mmdskin-forge-*.jar; do
+          cd ../../../neoforge/build/libs
+          for f in mmdskin-neoforge-*.jar; do
             case "$f" in *-dev*|*-sources*) continue;; esac
             mv "$f" "${f%.jar}-$version-universal.jar"
           done
@@ -398,9 +398,9 @@ jobs:
       - name: Upload Universal Forge Mod
         uses: actions/upload-artifact@v4
         with:
-          name: mmdskin-forge-1.21.1-universal
+          name: mmdskin-neoforge-1.21.1-universal
           path: |
-            forge/build/libs/*-universal.jar
+            neoforge/build/libs/*-universal.jar
           if-no-files-found: error
 
   # ==================== 统一发布 ====================
@@ -433,7 +433,7 @@ jobs:
         with:
           files: |
             artifacts/mmdskin-fabric-1.21.1-universal/*.jar
-            artifacts/mmdskin-forge-1.21.1-universal/*.jar
+            artifacts/mmdskin-neoforge-1.21.1-universal/*.jar
             artifacts/mmdskin-fabric-1.20.1-universal/*.jar
             artifacts/mmdskin-forge-1.20.1-universal/*.jar
             artifacts/native-windows-x64/*.dll

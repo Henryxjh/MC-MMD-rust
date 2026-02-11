@@ -103,4 +103,4 @@ KAIMyEntitySaba/
 rust_engine/deps/mdanceio/
 babylon-mmd/
 bullet3/
-daily-release.sh
+daily-release.fish
