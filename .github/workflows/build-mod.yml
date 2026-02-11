@@ -3,9 +3,7 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'
-  pull_request:
-    branches: [main]
+      - 'dev-*'
   workflow_dispatch:
 
 env:
@@ -295,21 +293,22 @@ jobs:
 
       - name: Rename JARs to universal
         run: |
+          export version "git tag --sort=-creatordate | grep -e "dev.*" | head --lines 1"
           cd fabric/build/libs
           for f in mmdskin-fabric-*.jar; do
             case "$f" in *-dev*|*-sources*) continue;; esac
-            mv "$f" "${f%.jar}-universal.jar"
+            mv "$f" "${f%.jar}-$version-universal.jar"
           done
           cd ../../../forge/build/libs
           for f in mmdskin-forge-*.jar; do
             case "$f" in *-dev*|*-sources*) continue;; esac
-            mv "$f" "${f%.jar}-universal.jar"
+            mv "$f" "${f%.jar}-$version-universal.jar"
           done
 
       - name: Upload Universal Fabric Mod
         uses: actions/upload-artifact@v4
         with:
-          name: mmdskin-fabric-universal
+          name: mmdskin-fabric-1.20.1-universal
           path: |
             fabric/build/libs/*-universal.jar
           if-no-files-found: error
@@ -317,16 +316,98 @@ jobs:
       - name: Upload Universal Forge Mod
         uses: actions/upload-artifact@v4
         with:
-          name: mmdskin-forge-universal
+          name: mmdskin-forge-1.20.1-universal
+          path: |
+            forge/build/libs/*-universal.jar
+          if-no-files-found: error
+
+  # 打包1.21.1
+  build-java-1_21_1-universal:
+    needs: [build-rust-windows-x64, build-rust-windows-arm64, build-rust-linux-x64, build-rust-linux-arm64, build-rust-linux-loongarch64, build-rust-linux-riscv64, build-rust-macos-x64, build-rust-macos-arm64, build-rust-android-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 1.21.1
+          submodules: recursive
+
+      - name: Download all native libraries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: native-libs
+
+      - name: Copy ALL natives to resources
+        run: |
+          mkdir -p common/src/main/resources/natives/windows-x64
+          mkdir -p common/src/main/resources/natives/windows-arm64
+          mkdir -p common/src/main/resources/natives/linux-x64
+          mkdir -p common/src/main/resources/natives/linux-arm64
+          mkdir -p common/src/main/resources/natives/linux-loongarch64
+          mkdir -p common/src/main/resources/natives/linux-riscv64
+          mkdir -p common/src/main/resources/natives/macos-x64
+          mkdir -p common/src/main/resources/natives/macos-arm64
+          mkdir -p common/src/main/resources/natives/android-arm64
+          cp native-libs/native-windows-x64/mmd_engine.dll common/src/main/resources/natives/windows-x64/
+          cp native-libs/native-windows-arm64/mmd_engine.dll common/src/main/resources/natives/windows-arm64/
+          cp native-libs/native-linux-x64/libmmd_engine.so common/src/main/resources/natives/linux-x64/
+          cp native-libs/native-linux-arm64/libmmd_engine.so common/src/main/resources/natives/linux-arm64/
+          cp native-libs/native-linux-loongarch64/libmmd_engine.so common/src/main/resources/natives/linux-loongarch64/
+          cp native-libs/native-linux-riscv64/libmmd_engine.so common/src/main/resources/natives/linux-riscv64/
+          cp native-libs/native-macos-x64/libmmd_engine.dylib common/src/main/resources/natives/macos-x64/
+          cp native-libs/native-macos-arm64/libmmd_engine.dylib common/src/main/resources/natives/macos-arm64/
+          cp native-libs/native-android-arm64/libmmd_engine.so common/src/main/resources/natives/android-arm64/
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew build --no-daemon -x test
+
+      - name: Rename JARs to universal
+        run: |
+          export version "git tag --sort=-creatordate | grep -e "dev.*" | head --lines 1"
+          cd fabric/build/libs
+          for f in mmdskin-fabric-*.jar; do
+            case "$f" in *-dev*|*-sources*) continue;; esac
+            mv "$f" "${f%.jar}-$version-universal.jar"
+          done
+          cd ../../../forge/build/libs
+          for f in mmdskin-forge-*.jar; do
+            case "$f" in *-dev*|*-sources*) continue;; esac
+            mv "$f" "${f%.jar}-$version-universal.jar"
+          done
+
+      - name: Upload Universal Fabric Mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmdskin-fabric-1.21.1-universal
+          path: |
+            fabric/build/libs/*-universal.jar
+          if-no-files-found: error
+
+      - name: Upload Universal Forge Mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmdskin-forge-1.21.1-universal
           path: |
             forge/build/libs/*-universal.jar
           if-no-files-found: error
 
   # ==================== 统一发布 ====================
   release:
-    needs: [build-rust-windows-x64, build-rust-windows-arm64, build-rust-linux-x64, build-rust-linux-arm64, build-rust-macos-x64, build-rust-macos-arm64, build-rust-android-arm64, build-rust-linux-loongarch64, build-rust-linux-riscv64, build-java-universal]
+    needs: [build-rust-windows-x64, build-rust-windows-arm64, build-rust-linux-x64, build-rust-linux-arm64, build-rust-macos-x64, build-rust-macos-arm64, build-rust-android-arm64, build-rust-linux-loongarch64, build-rust-linux-riscv64, build-java-universal, build-java-1_21_1-universal]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/dev-')
     permissions:
       contents: write
     steps:
@@ -351,10 +432,10 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/mmdskin-fabric/*.jar
-            artifacts/mmdskin-forge/*.jar
-            artifacts/mmdskin-fabric-universal/*.jar
-            artifacts/mmdskin-forge-universal/*.jar
+            artifacts/mmdskin-fabric-1.21.1-universal/*.jar
+            artifacts/mmdskin-forge-1.21.1-universal/*.jar
+            artifacts/mmdskin-fabric-1.20.1-universal/*.jar
+            artifacts/mmdskin-forge-1.20.1-universal/*.jar
             artifacts/native-windows-x64/*.dll
             artifacts/native-windows-arm64/*.dll
             artifacts/native-linux-x64/*.so

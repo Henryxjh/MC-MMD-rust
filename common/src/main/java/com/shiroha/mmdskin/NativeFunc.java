@@ -71,7 +71,7 @@ public class NativeFunc {
         isLinux = System.getProperty("os.name").toLowerCase().contains("linux") && !isAndroid;
     }
     static final String libraryVersion = "v1.0.2";
-    private static final String RELEASE_BASE_URL = "https://github.com/shiroha-23/MC-MMD-rust/releases/download/" + libraryVersion + "/";
+    private static final String RELEASE_BASE_URL = "https://github.com/Henryxjh/MC-MMD-rust/releases/download/" + libraryVersion + "/";
     private static volatile NativeFunc inst;
     private static final Object lock = new Object();
 
