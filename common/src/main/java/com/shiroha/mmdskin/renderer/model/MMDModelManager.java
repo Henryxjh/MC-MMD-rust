@@ -456,6 +456,19 @@ public class MMDModelManager {
     }
     
     /**
+     * 查询指定模型是否正在异步加载中
+     * 用于 Mixin 判断是否应跳过原版渲染（避免切换模型时闪现原版模型）
+     * 
+     * @param modelName 模型名称
+     * @param cacheKey 缓存键（通常是玩家名）
+     * @return true 表示模型正在加载中，不应回退到原版渲染
+     */
+    public static boolean isModelPending(String modelName, String cacheKey) {
+        String fullCacheKey = modelName + "_" + cacheKey;
+        return pendingLoads.containsKey(fullCacheKey);
+    }
+    
+    /**
      * 查询是否有正在加载的模型
      */
     public static boolean isAnyModelLoading() {

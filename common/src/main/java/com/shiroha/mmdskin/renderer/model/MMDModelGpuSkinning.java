@@ -173,6 +173,7 @@ public class MMDModelGpuSkinning implements IMMDModel {
             computeShader = new SkinningComputeShader();
             if (!computeShader.init()) {
                 logger.error("蒙皮 Compute Shader 初始化失败，回退到 CPU 蒙皮");
+                computeShader = null; // 重置，防止后续模型跳过 init 检查
                 return null;
             }
         }
@@ -210,7 +211,9 @@ public class MMDModelGpuSkinning implements IMMDModel {
             computeShader = new SkinningComputeShader();
             if (!computeShader.init()) {
                 logger.error("蒙皮 Compute Shader 初始化失败，回退到 CPU 蒙皮");
-                nf.DeleteModel(model);
+                computeShader = null; // 重置，防止后续模型跳过 init 检查
+                // 注意：不删除 model 句柄，由调用者（RenderModeManager）负责管理，
+                // 避免多工厂回退时 use-after-free
                 return null;
             }
         }

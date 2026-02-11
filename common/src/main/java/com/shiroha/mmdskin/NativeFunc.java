@@ -29,6 +29,8 @@ public class NativeFunc {
         return gameDirectory;
     }
     private static final boolean isAndroid;
+    /** 供其他模块查询当前是否运行在 Android 环境 */
+    public static boolean isAndroid() { return isAndroid; }
     private static final boolean isLinux;
     private static final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("windows");
     private static final boolean isMacOS = System.getProperty("os.name").toLowerCase().contains("mac");

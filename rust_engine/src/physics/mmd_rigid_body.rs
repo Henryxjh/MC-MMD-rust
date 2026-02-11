@@ -157,13 +157,12 @@ impl MMDRigidBody {
             }
         };
         
-        let linear_damping = self.linear_damping * config.linear_damping_scale;
-        let angular_damping = self.angular_damping * config.angular_damping_scale;
-        
+        // Rapier 阻尼设为 0：我们自己实现 Bullet3 指数衰减阻尼
+        // PMX 原始阻尼值存储在 self.linear_damping / self.angular_damping 中
         RigidBodyBuilder::new(rb_type)
             .position(self.initial_transform)
-            .linear_damping(linear_damping)
-            .angular_damping(angular_damping)
+            .linear_damping(0.0)
+            .angular_damping(0.0)
             .ccd_enabled(false)
             .can_sleep(false) // MMD 物理不使用休眠
             .build()

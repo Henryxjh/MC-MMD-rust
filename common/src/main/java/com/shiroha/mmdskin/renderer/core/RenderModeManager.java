@@ -165,9 +165,9 @@ public class RenderModeManager {
             }
         }
         
-        // 回退：返回任何可用的工厂
+        // 回退：返回可用但未启用的工厂（跳过第一轮已尝试过的）
         for (IMMDModelFactory factory : sorted) {
-            if (factory.isAvailable()) {
+            if (factory.isAvailable() && !factory.isEnabled()) {
                 return factory;
             }
         }
@@ -270,9 +270,10 @@ public class RenderModeManager {
             }
         }
         
-        // 回退：尝试任何可用工厂
+        // 回退：尝试可用但未启用的工厂（跳过第一轮已尝试过的）
         for (IMMDModelFactory factory : sorted) {
-            if (factory.isAvailable()) {
+            if (factory.isAvailable() && !factory.isEnabled()) {
+                logger.info("回退尝试未启用工厂: {}", factory.getModeName());
                 try {
                     IMMDModel model = factory.createModelFromHandle(modelHandle, modelDir);
                     if (model != null) return model;

@@ -61,15 +61,30 @@ public abstract class ForgePlayerRendererMixin extends LivingEntityRenderer<Abst
         
         // 如果选择了默认渲染或未选择模型，使用原版渲染
         if (selectedModel == null || selectedModel.isEmpty() || selectedModel.equals("默认 (原版渲染)")) {
-            super.render(player, entityYaw, tickDelta, matrixStack, vertexConsumers, packedLight);
+            if (isLocalPlayer) {
+                // 清理第一人称状态，防止残留的相机偏移
+                FirstPersonManager.reset();
+                // LevelRendererMixin 会在第一人称配置开启时强制渲染本地玩家（用于 MMD 模型），
+                // 但此处无 MMD 模型，需要取消渲染以避免原版模型挡住视野
+                if (FirstPersonManager.shouldRenderFirstPerson()) {
+                    ci.cancel();
+                    return;
+                }
+            }
+            // 非本地玩家或非第一人称：让原版 PlayerRenderer.render() 正常处理
             return;
         }
         
         // 加载模型（使用玩家名作为缓存键）
         MMDModelManager.Model modelData = MMDModelManager.GetModel(selectedModel, playerName);
         
-        // 如果模型加载失败，使用原版渲染
+        // 模型尚未就绪：正在异步加载中则跳过渲染（避免闪现原版模型）
         if (modelData == null) {
+            if (MMDModelManager.isModelPending(selectedModel, playerName)) {
+                ci.cancel();
+                return;
+            }
+            // 非加载中（模型不存在或加载失败），回退到原版渲染
             super.render(player, entityYaw, tickDelta, matrixStack, vertexConsumers, packedLight);
             return;
         }
