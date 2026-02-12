@@ -47,33 +47,13 @@ public class ConfigData {
     
     // ==================== 物理引擎配置（Bullet3） ====================
     // 默认值与 Rust PhysicsConfig 保持一致
-    public float physicsGravityY = -3.8f;
+    public boolean physicsEnabled = true;
+    public float physicsGravityY = -98.0f;
     public float physicsFps = 60.0f;
-    public int physicsMaxSubstepCount = 4;
-    public int physicsSolverIterations = 4;
-    public int physicsPgsIterations = 2;
-    public float physicsMaxCorrectiveVelocity = 0.1f;
-    public float physicsLinearDampingScale = 0.3f;
-    public float physicsAngularDampingScale = 0.2f;
-    public float physicsMassScale = 2.0f;
-    public float physicsLinearSpringStiffnessScale = 0.01f;
-    public float physicsAngularSpringStiffnessScale = 0.01f;
-    public float physicsLinearSpringDampingFactor = 8.0f;
-    public float physicsAngularSpringDampingFactor = 8.0f;
-    // 惯性效果
-    public float physicsInertiaStrength = 1.0f;
-    public float physicsMaxLinearVelocity = 1.0f;
-    public float physicsMaxAngularVelocity = 1.0f;
-    public boolean physicsBustEnabled = true;
-    public float physicsBustLinearDampingScale = 1.5f;
-    public float physicsBustAngularDampingScale = 1.5f;
-    public float physicsBustMassScale = 1.0f;
-    public float physicsBustLinearSpringStiffnessScale = 10.0f;
-    public float physicsBustAngularSpringStiffnessScale = 10.0f;
-    public float physicsBustLinearSpringDampingFactor = 3.0f;
-    public float physicsBustAngularSpringDampingFactor = 3.0f;
-    // 胸部防凹陷
-    public boolean physicsBustClampInward = true;
+    public int physicsMaxSubstepCount = 5;
+    public float physicsInertiaStrength = 0.5f;
+    public float physicsMaxLinearVelocity = 5.0f;
+    public float physicsMaxAngularVelocity = 5.0f;
     public boolean physicsJointsEnabled = true;
     public boolean physicsDebugLog = false;
     

@@ -59,6 +59,8 @@
   "gui.mmdskin.mod_settings.toon_outline_color.tooltip": "描边颜色",
   
   "gui.mmdskin.mod_settings.category.physics": "物理引擎设置（Bullet3）",
+  "gui.mmdskin.mod_settings.physics_enabled": "启用物理模拟",
+  "gui.mmdskin.mod_settings.physics_enabled.tooltip": "关闭后头发、裙子等将不再受物理影响",
   "gui.mmdskin.mod_settings.physics_gravity": "重力强度",
   "gui.mmdskin.mod_settings.physics_gravity.tooltip": "重力加速度（MMD 标准 98，值越大头发越重、下垂越快）",
   "gui.mmdskin.mod_settings.physics_fps": "物理帧率",

@@ -59,6 +59,8 @@
   "gui.mmdskin.mod_settings.toon_outline_color.tooltip": "アウトラインの色",
 
   "gui.mmdskin.mod_settings.category.physics": "物理設定（Bullet3）",
+  "gui.mmdskin.mod_settings.physics_enabled": "物理シミュレーションを有効化",
+  "gui.mmdskin.mod_settings.physics_enabled.tooltip": "無効化で髪、スカートなどが物理の影響を受けなくなります",
   "gui.mmdskin.mod_settings.physics_gravity": "重力強度",
   "gui.mmdskin.mod_settings.physics_gravity.tooltip": "重力加速度（MMD標準 98、高いほど髪が重く、早く落ちる）",
   "gui.mmdskin.mod_settings.physics_fps": "物理FPS",

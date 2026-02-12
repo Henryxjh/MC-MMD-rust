@@ -698,6 +698,7 @@ public class NativeFunc {
     /**
      * 设置全局物理配置（Bullet3，实时调整）
      *
+     * @param enabled 是否启用物理模拟
      * @param gravityY 重力 Y 分量（负数向下，MMD 标准 -98.0）
      * @param physicsFps 物理 FPS（固定时间步）
      * @param maxSubstepCount 每帧最大子步数
@@ -708,31 +709,13 @@ public class NativeFunc {
      * @param debugLog 是否输出调试日志
      */
     public native void SetPhysicsConfig(
+        boolean enabled,
         float gravityY,
         float physicsFps,
         int maxSubstepCount,
-        int solverIterations,
-        int pgsIterations,
-        float maxCorrectiveVelocity,
-        float linearDampingScale,
-        float angularDampingScale,
-        float massScale,
-        float linearSpringStiffnessScale,
-        float angularSpringStiffnessScale,
-        float linearSpringDampingFactor,
-        float angularSpringDampingFactor,
         float inertiaStrength,
         float maxLinearVelocity,
         float maxAngularVelocity,
-        boolean bustPhysicsEnabled,
-        float bustLinearDampingScale,
-        float bustAngularDampingScale,
-        float bustMassScale,
-        float bustLinearSpringStiffnessScale,
-        float bustAngularSpringStiffnessScale,
-        float bustLinearSpringDampingFactor,
-        float bustAngularSpringDampingFactor,
-        boolean bustClampInward,
         boolean jointsEnabled,
         boolean debugLog
     );

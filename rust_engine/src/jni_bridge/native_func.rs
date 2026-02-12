@@ -2604,6 +2604,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyMaterialMorphResu
 pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetPhysicsConfig(
     _env: JNIEnv,
     _class: JClass,
+    enabled: jboolean,
     gravity_y: jfloat,
     physics_fps: jfloat,
     max_substep_count: jint,
@@ -2616,6 +2617,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetPhysicsConfig(
     use crate::physics::config::{PhysicsConfig, set_config};
 
     let config = PhysicsConfig {
+        enabled: enabled != 0,
         gravity_y,
         physics_fps,
         max_substep_count: max_substep_count as i32,

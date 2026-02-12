@@ -141,6 +141,10 @@ public class ConfigManager {
     }
     
     // ==================== 物理引擎配置（Bullet3） ====================
+
+    public static boolean isPhysicsEnabled() {
+        return provider != null ? provider.isPhysicsEnabled() : true;
+    }
     
     public static float getPhysicsGravityY() {
         return provider != null ? provider.getPhysicsGravityY() : -98.0f;

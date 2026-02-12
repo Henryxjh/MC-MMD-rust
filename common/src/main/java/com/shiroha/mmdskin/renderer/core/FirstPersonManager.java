@@ -159,9 +159,10 @@ public final class FirstPersonManager {
         double px = Mth.lerp(partialTick, entity.xo, entity.getX());
         double py = Mth.lerp(partialTick, entity.yo, entity.getY());
         double pz = Mth.lerp(partialTick, entity.zo, entity.getZ());
-        // 修复：直接使用实体当前的 bodyYaw 而不是进行 lerp 插值，以解决相机抖动问题
-        // bodyYaw 的插值在某些情况下会产生微小的相位差，导致模型坐标与相机坐标不完全同步
-        float bodyYaw = entity instanceof LivingEntity le ? le.yBodyRot : entity.getYRot();
+        // bodyYaw 必须使用 lerp 插值，与 PlayerRendererMixin 中模型渲染一致
+        float bodyYaw = entity instanceof LivingEntity le
+                ? Mth.rotLerp(partialTick, le.yBodyRotO, le.yBodyRot)
+                : Mth.rotLerp(partialTick, entity.yRotO, entity.getYRot());
         float yawRad = (float) Math.toRadians(bodyYaw);
         double sinYaw = Math.sin(yawRad);
         double cosYaw = Math.cos(yawRad);

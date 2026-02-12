@@ -1835,7 +1835,11 @@ impl MmdModel {
     /// 流程：sync_bodies → stepSimulation → sync_bones
     /// 所有中间数据复用预分配缓冲区，零堆分配。
     pub fn update_physics(&mut self, delta_time: f32) {
-        if !self.physics_enabled || self.physics.is_none() {
+        // 全局开关 + per-model 开关双重检查
+        if !crate::physics::config::get_config().enabled
+            || !self.physics_enabled
+            || self.physics.is_none()
+        {
             return;
         }
 

@@ -231,9 +231,9 @@ impl MMDPhysics {
 
         // 第二步：给动态刚体施加惯性力
         if config.inertia_strength > 0.0 && model_velocity.length_squared() > 1e-8 {
-            // 防止传送导致的速度爆炸
+            // 钳制世界速度（20 blocks/s 覆盖疾跑+速度药水，超出视为传送）
             let speed_sq = model_velocity.length_squared();
-            let max_speed = 500.0_f32;
+            let max_speed = 20.0_f32;
             let world_vel = if speed_sq > max_speed * max_speed {
                 model_velocity * (max_speed / speed_sq.sqrt())
             } else {
@@ -252,7 +252,11 @@ impl MMDPhysics {
                 local_vel.z * config.inertia_strength,
             );
 
-            // F = m * v / dt（力施加方式，不会跨帧累积）
+            // 最大加速度 = max_linear_velocity * physics_fps
+            // 确保单个物理子步内速度增量不超过 max_linear_velocity
+            let max_accel = config.max_linear_velocity * self.fps;
+
+            // F = m * v / dt，再钳制力大小防止衣服拉伸
             for rb_data in &self.rigid_bodies {
                 if rb_data.physics_mode == PhysicsMode::FollowBone {
                     continue;
@@ -260,7 +264,13 @@ impl MMDPhysics {
                 if let Some(ref body) = rb_data.bullet_body {
                     let mass = body.get_mass();
                     if mass > 0.0 {
-                        let force = inertia_vel * mass / dt;
+                        let mut force = inertia_vel * mass / dt;
+                        // 钳制力：限制加速度上限
+                        let max_force = max_accel * mass;
+                        let force_sq = force.length_squared();
+                        if force_sq > max_force * max_force {
+                            force *= max_force / force_sq.sqrt();
+                        }
                         body.apply_central_force(force.x, force.y, force.z);
                     }
                 }
