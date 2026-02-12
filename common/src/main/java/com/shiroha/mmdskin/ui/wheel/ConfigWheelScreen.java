@@ -1,12 +1,16 @@
 package com.shiroha.mmdskin.ui.wheel;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.shiroha.mmdskin.ui.selector.MaterialVisibilityScreen;
 import com.shiroha.mmdskin.ui.selector.ModelSelectorScreen;
 import com.shiroha.mmdskin.ui.stage.StageSelectScreen;
+import com.shiroha.mmdskin.util.KeyMappingUtil;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,14 +31,14 @@ public class ConfigWheelScreen extends AbstractWheelScreen {
     private final List<ConfigSlot> configSlots;
     
     // 监控的按键（用于检测松开）
-    private final int monitoredKey;
+    private final KeyMapping monitoredKey;
     
     // 模组设置界面打开回调（由平台实现）
     private static Supplier<Screen> modSettingsScreenFactory;
     
-    public ConfigWheelScreen(int keyCode) {
+    public ConfigWheelScreen(KeyMapping keyMapping) {
         super(Component.translatable("gui.mmdskin.config_wheel"), STYLE);
-        this.monitoredKey = keyCode;
+        this.monitoredKey = keyMapping;
         this.configSlots = new ArrayList<>();
         initConfigSlots();
     }
@@ -96,21 +100,39 @@ public class ConfigWheelScreen extends AbstractWheelScreen {
     @Override
     public void tick() {
         super.tick();
+
+        // 只有在当前界面确实是 ConfigWheelScreen 时才检测按键
+        if (Minecraft.getInstance().screen != this) {
+            return;
+        }
+
         // 检测按键是否松开
-        long window = Minecraft.getInstance().getWindow().getWindow();
-        if (!isKeyDown(window, monitoredKey)) {
-            if (selectedSlot >= 0 && selectedSlot < configSlots.size()) {
-                ConfigSlot slot = configSlots.get(selectedSlot);
-                this.onClose();
-                slot.action.run();
+        if (monitoredKey != null) {
+            boolean isDown = false;
+
+            // 兜底逻辑：如果 KeyMapping.isDown() 为 false，尝试通过直接检测物理按键状态
+            // 这解决了从游戏切换到 Screen 时，Minecraft 内部 KeyMapping 状态更新延迟导致的闪烁问题
+            if (monitoredKey.isDown()) {
+                isDown = true;
             } else {
-                this.onClose();
+                long window = Minecraft.getInstance().getWindow().getWindow();
+                InputConstants.Key key = KeyMappingUtil.getBoundKey(monitoredKey);
+                if (key != null && key.getType() == InputConstants.Type.KEYSYM && key.getValue() != -1) {
+                    isDown = GLFW.glfwGetKey(window, key.getValue()) == GLFW.GLFW_PRESS;
+                }
+            }
+
+            if (!isDown) {
+                // 按键松开，执行选中的操作并关闭
+                if (selectedSlot >= 0 && selectedSlot < configSlots.size()) {
+                    ConfigSlot slot = configSlots.get(selectedSlot);
+                    this.onClose();
+                    slot.action.run();
+                } else {
+                    this.onClose();
+                }
             }
         }
-    }
-    
-    private boolean isKeyDown(long window, int keyCode) {
-        return org.lwjgl.glfw.GLFW.glfwGetKey(window, keyCode) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
     }
 
     private void renderSlotLabels(GuiGraphics guiGraphics) {

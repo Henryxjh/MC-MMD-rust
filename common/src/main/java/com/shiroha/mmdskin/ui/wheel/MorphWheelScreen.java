@@ -8,6 +8,8 @@ import com.shiroha.mmdskin.ui.config.ModelSelectorConfig;
 import com.shiroha.mmdskin.ui.config.MorphWheelConfig;
 import com.shiroha.mmdskin.ui.config.MorphWheelConfigScreen;
 import com.shiroha.mmdskin.ui.network.MorphWheelNetworkHandler;
+import com.shiroha.mmdskin.util.KeyMappingUtil;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -32,7 +34,7 @@ public class MorphWheelScreen extends AbstractWheelScreen {
     
     private static final int TEXT_COLOR = 0xFFFFFFFF;
     
-    private final int triggerKeyCode;
+    private final KeyMapping triggerKey;
     
     private List<MorphSlot> morphSlots = new ArrayList<>();
     
@@ -48,9 +50,9 @@ public class MorphWheelScreen extends AbstractWheelScreen {
         }
     }
     
-    public MorphWheelScreen(int triggerKeyCode) {
+    public MorphWheelScreen(KeyMapping triggerKey) {
         super(Component.translatable("gui.mmdskin.morph_wheel"), STYLE);
-        this.triggerKeyCode = triggerKeyCode;
+        this.triggerKey = triggerKey;
     }
 
     @Override
@@ -171,13 +173,16 @@ public class MorphWheelScreen extends AbstractWheelScreen {
     
     @Override
     public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-        if (keyCode == triggerKeyCode) {
-            // 松开按键时执行选中的表情
-            if (selectedSlot >= 0 && selectedSlot < morphSlots.size()) {
-                executeMorph(morphSlots.get(selectedSlot));
+        if (triggerKey != null) {
+            com.mojang.blaze3d.platform.InputConstants.Key boundKey = KeyMappingUtil.getBoundKey(triggerKey);
+            if (boundKey != null && boundKey.getType() == com.mojang.blaze3d.platform.InputConstants.Type.KEYSYM && boundKey.getValue() == keyCode) {
+                // 松开按键时执行选中的表情
+                if (selectedSlot >= 0 && selectedSlot < morphSlots.size()) {
+                    executeMorph(morphSlots.get(selectedSlot));
+                }
+                this.onClose();
+                return true;
             }
-            this.onClose();
-            return true;
         }
         return super.keyReleased(keyCode, scanCode, modifiers);
     }
