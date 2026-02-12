@@ -304,14 +304,14 @@ jobs:
             !fabric/build/libs/*-sources*.jar
           if-no-files-found: error
 
-      - name: Upload Forge Mod
+      - name: Upload NeoForge Mod
         uses: actions/upload-artifact@v4
         with:
-          name: mmdskin-forge-${{ steps.version.outputs.mod_version }}
+          name: mmdskin-neoforge-${{ steps.version.outputs.mod_version }}
           path: |
-            forge/build/libs/mmdskin-forge-*.jar
-            !forge/build/libs/*-dev*.jar
-            !forge/build/libs/*-sources*.jar
+            neoforge/build/libs/mmdskin-neoforge-*.jar
+            !neoforge/build/libs/*-dev*.jar
+            !neoforge/build/libs/*-sources*.jar
           if-no-files-found: error
 
   # ==================== Java 模组构建（通用版：包含所有平台） ====================
@@ -379,8 +379,8 @@ jobs:
             case "$f" in *-dev*|*-sources*) continue;; esac
             mv "$f" "${f%.jar}-universal.jar"
           done
-          cd ../../../forge/build/libs
-          for f in mmdskin-forge-*.jar; do
+          cd ../../../neoforge/build/libs
+          for f in mmdskin-neoforge-*.jar; do
             case "$f" in *-dev*|*-sources*) continue;; esac
             mv "$f" "${f%.jar}-universal.jar"
           done
@@ -393,12 +393,12 @@ jobs:
             fabric/build/libs/*-universal.jar
           if-no-files-found: error
 
-      - name: Upload Universal Forge Mod
+      - name: Upload Universal NeoForge Mod
         uses: actions/upload-artifact@v4
         with:
-          name: mmdskin-forge-${{ steps.version.outputs.mod_version }}-universal
+          name: mmdskin-neoforge-${{ steps.version.outputs.mod_version }}-universal
           path: |
-            forge/build/libs/*-universal.jar
+            neoforge/build/libs/*-universal.jar
           if-no-files-found: error
 
   # ==================== 统一发布 ====================
@@ -431,9 +431,9 @@ jobs:
         with:
           files: |
             artifacts/mmdskin-fabric-*/*.jar
-            artifacts/mmdskin-forge-*/*.jar
+            artifacts/mmdskin-neoforge-*/*.jar
             artifacts/mmdskin-fabric-*-universal/*.jar
-            artifacts/mmdskin-forge-*-universal/*.jar
+            artifacts/mmdskin-neoforge-*-universal/*.jar
             artifacts/native-windows-x64/*.dll
             artifacts/native-windows-arm64/*.dll
             artifacts/native-linux-x64/*.so
