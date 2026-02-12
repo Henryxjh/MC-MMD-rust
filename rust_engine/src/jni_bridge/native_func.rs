@@ -15,7 +15,7 @@ use crate::texture::load_texture;
 
 use super::{register_animation, register_model, register_texture, ANIMATIONS, MODELS, TEXTURES};
 
-const VERSION: &str = "v1.0.2";
+const VERSION: &str = "v1.0.3";
 
 // ============================================================================
 // 基础函数
