@@ -1,11 +1,15 @@
 package com.shiroha.mmdskin.ui.wheel;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.shiroha.mmdskin.maid.MaidActionWheelScreen;
 import com.shiroha.mmdskin.maid.MaidModelSelectorScreen;
 import com.shiroha.mmdskin.ui.selector.MaterialVisibilityScreen;
+import com.shiroha.mmdskin.util.KeyMappingUtil;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,14 +35,14 @@ public class MaidConfigWheelScreen extends AbstractWheelScreen {
     private final String maidName;
     
     // 监控的按键
-    private final int monitoredKey;
+    private final KeyMapping monitoredKey;
     
-    public MaidConfigWheelScreen(UUID maidUUID, int maidEntityId, String maidName, int keyCode) {
+    public MaidConfigWheelScreen(UUID maidUUID, int maidEntityId, String maidName, KeyMapping keyMapping) {
         super(Component.translatable("gui.mmdskin.maid_config_wheel"), STYLE);
         this.maidUUID = maidUUID;
         this.maidEntityId = maidEntityId;
         this.maidName = maidName;
-        this.monitoredKey = keyCode;
+        this.monitoredKey = keyMapping;
         this.configSlots = new ArrayList<>();
         initConfigSlots();
     }
@@ -83,20 +87,38 @@ public class MaidConfigWheelScreen extends AbstractWheelScreen {
     @Override
     public void tick() {
         super.tick();
-        long window = Minecraft.getInstance().getWindow().getWindow();
-        if (!isKeyDown(window, monitoredKey)) {
-            if (selectedSlot >= 0 && selectedSlot < configSlots.size()) {
-                ConfigSlot slot = configSlots.get(selectedSlot);
-                this.onClose();
-                slot.action.run();
+
+        // 只有在当前界面确实是 MaidConfigWheelScreen 时才检测按键
+        if (Minecraft.getInstance().screen != this) {
+            return;
+        }
+
+        // 检测按键是否松开
+        if (monitoredKey != null) {
+            boolean isDown = false;
+
+            // 兜底逻辑
+            if (monitoredKey.isDown()) {
+                isDown = true;
             } else {
-                this.onClose();
+                long window = Minecraft.getInstance().getWindow().getWindow();
+                InputConstants.Key key = KeyMappingUtil.getBoundKey(monitoredKey);
+                if (key != null && key.getType() == InputConstants.Type.KEYSYM && key.getValue() != -1) {
+                    isDown = GLFW.glfwGetKey(window, key.getValue()) == GLFW.GLFW_PRESS;
+                }
+            }
+
+            if (!isDown) {
+                // 按键松开，执行选中的操作并关闭
+                if (selectedSlot >= 0 && selectedSlot < configSlots.size()) {
+                    ConfigSlot slot = configSlots.get(selectedSlot);
+                    this.onClose();
+                    slot.action.run();
+                } else {
+                    this.onClose();
+                }
             }
         }
-    }
-    
-    private boolean isKeyDown(long window, int keyCode) {
-        return org.lwjgl.glfw.GLFW.glfwGetKey(window, keyCode) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
     }
 
     private void renderSlotLabels(GuiGraphics guiGraphics) {

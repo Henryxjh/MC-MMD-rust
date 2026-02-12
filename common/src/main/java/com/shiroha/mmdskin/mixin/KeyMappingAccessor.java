@@ -1,4 +1,4 @@
-package com.shiroha.mmdskin.mixin.fabric;
+package com.shiroha.mmdskin.mixin;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
