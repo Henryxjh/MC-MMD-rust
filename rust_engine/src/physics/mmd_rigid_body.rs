@@ -31,6 +31,10 @@ impl From<RigidBodyMode> for PhysicsMode {
 }
 
 /// MMD 刚体数据（移植自 babylon-mmd MmdRigidBodyData）
+///
+/// # Drop 顺序安全
+/// `bullet_body` 必须声明在 `bullet_shape` 之前，Rust 按字段声明顺序 drop，
+/// 确保刚体先于碰撞形状释放（刚体内部引用了形状指针）。
 pub struct MmdRigidBodyData {
     /// 刚体名称
     pub name: String,

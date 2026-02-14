@@ -34,6 +34,8 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetVersion(
 }
 
 /// 读取字节
+/// # Safety
+/// Java 侧必须保证 data 为有效的 Rust 堆指针，pos 在数据范围内
 #[no_mangle]
 pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_ReadByte(
     _env: JNIEnv,
@@ -51,6 +53,8 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_ReadByte(
 }
 
 /// 复制数据到 ByteBuffer
+/// # Safety
+/// Java 侧必须保证 data 为有效指针且 len 不超过实际数据长度
 #[no_mangle]
 pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_CopyDataToByteBuffer(
     env: JNIEnv,
@@ -140,7 +144,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_DeleteModel(
     _class: JClass,
     model: jlong,
 ) {
-    let mut models = MODELS.write().unwrap();
+    let mut models = MODELS.write().unwrap_or_else(|e| e.into_inner());
     models.remove(&model);
 }
 
@@ -179,6 +183,8 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetVertexCount(
 }
 
 /// 获取顶点位置数据指针
+/// # Safety
+/// 返回的裸指针仅在当前帧内有效，Java 侧必须在同一帧内完成读取
 #[no_mangle]
 pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetPoss(
     _env: JNIEnv,
@@ -367,9 +373,11 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetMaterialToonTex(
         .unwrap_or(ptr::null_mut())
 }
 
-// 颜色数据缓存（用于返回指针）
+// 颜色数据缓存（每种颜色独立缓冲区，避免互相覆盖）
 thread_local! {
-    static COLOR_BUFFER: std::cell::RefCell<[f32; 4]> = std::cell::RefCell::new([0.0; 4]);
+    static AMBIENT_BUFFER: std::cell::RefCell<[f32; 4]> = std::cell::RefCell::new([0.0; 4]);
+    static DIFFUSE_BUFFER: std::cell::RefCell<[f32; 4]> = std::cell::RefCell::new([0.0; 4]);
+    static SPECULAR_BUFFER: std::cell::RefCell<[f32; 4]> = std::cell::RefCell::new([0.0; 4]);
 }
 
 /// 获取材质环境光颜色指针
@@ -386,7 +394,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetMaterialAmbient(
         let idx = pos as usize;
         if idx < model.materials.len() {
             let ambient = model.materials[idx].ambient;
-            COLOR_BUFFER.with(|buf| {
+            AMBIENT_BUFFER.with(|buf| {
                 let mut b = buf.borrow_mut();
                 b[0] = ambient.x;
                 b[1] = ambient.y;
@@ -416,7 +424,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetMaterialDiffuse(
         let idx = pos as usize;
         if idx < model.materials.len() {
             let diffuse = model.materials[idx].diffuse;
-            COLOR_BUFFER.with(|buf| {
+            DIFFUSE_BUFFER.with(|buf| {
                 let mut b = buf.borrow_mut();
                 b[0] = diffuse.x;
                 b[1] = diffuse.y;
@@ -446,7 +454,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetMaterialSpecular(
         let idx = pos as usize;
         if idx < model.materials.len() {
             let specular = model.materials[idx].specular;
-            COLOR_BUFFER.with(|buf| {
+            SPECULAR_BUFFER.with(|buf| {
                 let mut b = buf.borrow_mut();
                 b[0] = specular.x;
                 b[1] = specular.y;
@@ -696,13 +704,15 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_ChangeModelAnim(
     anim: jlong,
     layer: jlong,
 ) {
+    // 先读取动画并释放锁，避免同时持有 MODELS+ANIMATIONS 双锁
+    let anim_opt = {
+        let animations = ANIMATIONS.read().unwrap();
+        animations.get(&anim).cloned()
+    };
     let models = MODELS.read().unwrap();
-    let animations = ANIMATIONS.read().unwrap();
-
     if let Some(model_arc) = models.get(&model) {
         let mut model = model_arc.lock().unwrap();
         let layer_id = layer as usize;
-        let anim_opt = animations.get(&anim).cloned();
         model.set_layer_animation(layer_id, anim_opt);
         model.play_layer(layer_id);
     }
@@ -754,7 +764,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_DeleteAnimation(
     _class: JClass,
     anim: jlong,
 ) {
-    let mut animations = ANIMATIONS.write().unwrap();
+    let mut animations = ANIMATIONS.write().unwrap_or_else(|e| e.into_inner());
     animations.remove(&anim);
 }
 
@@ -1225,16 +1235,15 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_TransitionLayerTo(
     animation: jlong,
     transition_time: jfloat,
 ) {
+    let anim = if animation != 0 {
+        let animations = ANIMATIONS.read().unwrap();
+        animations.get(&animation).cloned()
+    } else {
+        None
+    };
     let models = MODELS.read().unwrap();
-    let animations = ANIMATIONS.read().unwrap();
-    
     if let Some(model_arc) = models.get(&model) {
         let mut model = model_arc.lock().unwrap();
-        let anim = if animation != 0 {
-            animations.get(&animation).cloned()
-        } else {
-            None
-        };
         model.transition_layer_to(layer as usize, anim, transition_time);
     }
 }
@@ -1305,7 +1314,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_DeleteTexture(
     _class: JClass,
     tex: jlong,
 ) {
-    let mut textures = TEXTURES.write().unwrap();
+    let mut textures = TEXTURES.write().unwrap_or_else(|e| e.into_inner());
     textures.remove(&tex);
 }
 
@@ -1395,7 +1404,7 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_DeleteMat(
     _class: JClass,
     mat: jlong,
 ) {
-    let mut matrices = MATRICES.lock().unwrap();
+    let mut matrices = MATRICES.lock().unwrap_or_else(|e| e.into_inner());
     matrices.remove(&mat);
 }
 
@@ -2051,10 +2060,12 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetGpuSkinningDebugIn
             bdef1_count, bdef2_count, bdef4_count, physics_enabled, dynamic_bones
         );
         
-        return env.new_string(&info).unwrap().into_raw();
+        if let Ok(s) = env.new_string(&info) {
+            return s.into_raw();
+        }
     }
     
-    env.new_string("模型未找到").unwrap().into_raw()
+    ptr::null_mut()
 }
 
 /// 仅更新动画（不执行 CPU 蒙皮，用于 GPU 蒙皮模式）
@@ -2402,7 +2413,9 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetMorphName(
             }
         }
     }
-    ptr::null_mut()
+    env.new_string("")
+        .map(|s| s.into_raw())
+        .unwrap_or(ptr::null_mut())
 }
 
 /// 获取 Morph 权重（通过索引）
