@@ -32,6 +32,12 @@ public final class PathConstants {
     /** 舞台动画目录名称（存放相机 VMD 文件） */
     public static final String STAGE_ANIM_DIR = "StageAnim";
     
+    /** 模型专属动画子文件夹名称 */
+    public static final String MODEL_ANIMS_DIR = "anims";
+    
+    /** 模型动画映射配置文件名 */
+    public static final String MODEL_ANIM_CONFIG = "animations.json";
+    
     // ==================== 表情目录 ====================
     /** 默认表情目录名称 */
     public static final String DEFAULT_MORPH_DIR = "DefaultMorph";
@@ -206,6 +212,27 @@ public final class PathConstants {
      */
     public static File getMorphWheelConfigFile() {
         return getConfigFile(MORPH_WHEEL_CONFIG);
+    }
+    
+    /**
+     * 获取模型专属动画子文件夹
+     */
+    public static File getModelAnimsDir(String modelName) {
+        return new File(getModelDir(modelName), MODEL_ANIMS_DIR);
+    }
+    
+    /**
+     * 获取模型专属动画子文件夹（通过模型目录路径）
+     */
+    public static File getModelAnimsDirByPath(String modelDirPath) {
+        return new File(modelDirPath, MODEL_ANIMS_DIR);
+    }
+    
+    /**
+     * 获取模型动画映射配置文件
+     */
+    public static File getModelAnimConfigFile(String modelDirPath) {
+        return new File(modelDirPath, MODEL_ANIM_CONFIG);
     }
     
     /**

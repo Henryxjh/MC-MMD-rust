@@ -89,13 +89,23 @@ public class ModelSettingsScreen extends Screen {
         
         // 底部按钮
         int btnY = listBottom + 4;
-        int btnW = (PANEL_WIDTH - 16) / 2;
+        int btnW = (PANEL_WIDTH - 16) / 3;
         
         this.addRenderableWidget(Button.builder(Component.translatable("gui.mmdskin.model_settings.save"), btn -> saveAndClose())
             .bounds(panelX + 4, btnY, btnW, 14).build());
         
         this.addRenderableWidget(Button.builder(Component.translatable("gui.mmdskin.model_settings.reset"), btn -> resetDefaults())
             .bounds(panelX + 8 + btnW, btnY, btnW, 14).build());
+        
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.mmdskin.model_settings.anim_config"), btn -> openAnimConfig())
+            .bounds(panelX + 12 + btnW * 2, btnY, btnW, 14).build());
+    }
+    
+    /**
+     * 打开动画映射配置界面
+     */
+    private void openAnimConfig() {
+        Minecraft.getInstance().setScreen(new ModelAnimationScreen(modelName, this));
     }
     
     /**
