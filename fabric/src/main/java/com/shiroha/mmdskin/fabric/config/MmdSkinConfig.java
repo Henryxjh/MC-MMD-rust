@@ -142,7 +142,7 @@ public final class MmdSkinConfig implements ConfigManager.IConfigProvider {
         return data.maxBones;
     }
     
-    // ==================== 物理引擎配置 ====================
+    // ==================== 物理引擎配置（Bullet3） ====================
     
     @Override
     public float getPhysicsGravityY() {
@@ -160,56 +160,6 @@ public final class MmdSkinConfig implements ConfigManager.IConfigProvider {
     }
     
     @Override
-    public int getPhysicsSolverIterations() {
-        return data.physicsSolverIterations;
-    }
-    
-    @Override
-    public int getPhysicsPgsIterations() {
-        return data.physicsPgsIterations;
-    }
-    
-    @Override
-    public float getPhysicsMaxCorrectiveVelocity() {
-        return data.physicsMaxCorrectiveVelocity;
-    }
-    
-    @Override
-    public float getPhysicsLinearDampingScale() {
-        return data.physicsLinearDampingScale;
-    }
-    
-    @Override
-    public float getPhysicsAngularDampingScale() {
-        return data.physicsAngularDampingScale;
-    }
-    
-    @Override
-    public float getPhysicsMassScale() {
-        return data.physicsMassScale;
-    }
-    
-    @Override
-    public float getPhysicsLinearSpringStiffnessScale() {
-        return data.physicsLinearSpringStiffnessScale;
-    }
-    
-    @Override
-    public float getPhysicsAngularSpringStiffnessScale() {
-        return data.physicsAngularSpringStiffnessScale;
-    }
-    
-    @Override
-    public float getPhysicsLinearSpringDampingFactor() {
-        return data.physicsLinearSpringDampingFactor;
-    }
-    
-    @Override
-    public float getPhysicsAngularSpringDampingFactor() {
-        return data.physicsAngularSpringDampingFactor;
-    }
-    
-    @Override
     public float getPhysicsInertiaStrength() {
         return data.physicsInertiaStrength;
     }
@@ -222,53 +172,6 @@ public final class MmdSkinConfig implements ConfigManager.IConfigProvider {
     @Override
     public float getPhysicsMaxAngularVelocity() {
         return data.physicsMaxAngularVelocity;
-    }
-    
-    // ==================== 胸部物理配置 ====================
-    
-    @Override
-    public boolean isPhysicsBustEnabled() {
-        return data.physicsBustEnabled;
-    }
-    
-    @Override
-    public float getPhysicsBustLinearDampingScale() {
-        return data.physicsBustLinearDampingScale;
-    }
-    
-    @Override
-    public float getPhysicsBustAngularDampingScale() {
-        return data.physicsBustAngularDampingScale;
-    }
-    
-    @Override
-    public float getPhysicsBustMassScale() {
-        return data.physicsBustMassScale;
-    }
-    
-    @Override
-    public float getPhysicsBustLinearSpringStiffnessScale() {
-        return data.physicsBustLinearSpringStiffnessScale;
-    }
-    
-    @Override
-    public float getPhysicsBustAngularSpringStiffnessScale() {
-        return data.physicsBustAngularSpringStiffnessScale;
-    }
-    
-    @Override
-    public float getPhysicsBustLinearSpringDampingFactor() {
-        return data.physicsBustLinearSpringDampingFactor;
-    }
-    
-    @Override
-    public float getPhysicsBustAngularSpringDampingFactor() {
-        return data.physicsBustAngularSpringDampingFactor;
-    }
-    
-    @Override
-    public boolean isPhysicsBustClampInward() {
-        return data.physicsBustClampInward;
     }
     
     @Override
@@ -284,5 +187,15 @@ public final class MmdSkinConfig implements ConfigManager.IConfigProvider {
     @Override
     public boolean isFirstPersonModelEnabled() {
         return data.firstPersonModelEnabled;
+    }
+
+    @Override
+    public float getFirstPersonCameraForwardOffset() {
+        return data.firstPersonCameraForwardOffset;
+    }
+
+    @Override
+    public float getFirstPersonCameraVerticalOffset() {
+        return data.firstPersonCameraVerticalOffset;
     }
 }

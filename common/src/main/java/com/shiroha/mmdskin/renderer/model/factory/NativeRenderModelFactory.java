@@ -2,6 +2,7 @@ package com.shiroha.mmdskin.renderer.model.factory;
 
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.IMMDModelFactory;
+import com.shiroha.mmdskin.renderer.core.RenderCategory;
 import com.shiroha.mmdskin.renderer.model.MMDModelNativeRender;
 
 import org.apache.logging.log4j.LogManager;
@@ -21,7 +22,15 @@ public class NativeRenderModelFactory implements IMMDModelFactory {
     /** 优先级：最高（Iris 兼容是首选） */
     private static final int PRIORITY = 20;
     
-    private boolean enabled = false;
+    @Override
+    public RenderCategory getCategory() {
+        return RenderCategory.NATIVE_RENDER;
+    }
+    
+    @Override
+    public boolean supportsPMD() {
+        return false;
+    }
     
     @Override
     public String getModeName() {
@@ -37,17 +46,6 @@ public class NativeRenderModelFactory implements IMMDModelFactory {
     public boolean isAvailable() {
         // 原生渲染始终可用（使用 Minecraft 自带系统）
         return true;
-    }
-    
-    @Override
-    public boolean isEnabled() {
-        return enabled;
-    }
-    
-    @Override
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-        logger.debug("原生渲染工厂: {}", enabled ? "启用" : "禁用");
     }
     
     @Override

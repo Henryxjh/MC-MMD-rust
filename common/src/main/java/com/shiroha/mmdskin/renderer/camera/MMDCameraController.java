@@ -136,6 +136,11 @@ public class MMDCameraController {
             this.anchorY = mc.player.getY();
             this.anchorZ = mc.player.getZ();
             this.anchorYaw = mc.player.getYRot();
+            // 重置玩家朝向，确保进入舞台时面向正前方
+            mc.player.setXRot(0.0f);
+            mc.player.setYRot(this.anchorYaw);
+            mc.player.yHeadRot = this.anchorYaw;
+            mc.player.yBodyRot = this.anchorYaw;
         }
         
         // 重载模型（清除上次播放的残留姿势，仅本地玩家）
@@ -641,6 +646,13 @@ public class MMDCameraController {
     
     public boolean isPlaying() {
         return state == StageState.PLAYING;
+    }
+    
+    /**
+     * 判断是否处于舞台模式（INTRO, STANDBY, PLAYING, OUTRO）
+     */
+    public boolean isInStageMode() {
+        return state != StageState.INACTIVE;
     }
     
     /**

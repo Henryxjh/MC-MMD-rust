@@ -5,6 +5,8 @@ import java.util.UUID;
 import com.shiroha.mmdskin.fabric.register.MmdSkinRegisterCommon;
 import com.shiroha.mmdskin.maid.MaidMMDModelManager;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRendererPlayerHelper;
+import com.shiroha.mmdskin.renderer.render.MorphSyncHelper;
+import com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -58,9 +60,9 @@ public class MmdSkinNetworkPack {
         UUID playerUUID = buffer.readUUID();
         
         // 根据 opCode 决定读取格式
-        if (opCode == 1 || opCode == 3 || opCode == 6 || opCode == 7 || opCode == 8) {
+        if (opCode == 1 || opCode == 3 || opCode == 6 || opCode == 7 || opCode == 8 || opCode == 9 || opCode == 10) {
             // opCode 1: 动作执行，opCode 3: 模型选择同步，opCode 6: 表情同步
-            // opCode 7: 舞台开始，opCode 8: 舞台结束
+            // opCode 7: 舞台开始，opCode 8: 舞台结束，opCode 9: 舞台音频，opCode 10: 请求模型信息
             String data = buffer.readUtf();
             DoInClientString(opCode, playerUUID, data);
         } else if (opCode == 4 || opCode == 5) {
@@ -102,43 +104,37 @@ public class MmdSkinNetworkPack {
         Minecraft MCinstance = Minecraft.getInstance();
         if (MCinstance.player == null) return;
         if (playerUUID.equals(MCinstance.player.getUUID())) return;
+        if (MCinstance.level == null) return;
             
+        Player target = MCinstance.level.getPlayerByUUID(playerUUID);
         switch (opCode) {
             case 1: {
-                // 执行动画
-                if (MCinstance.level == null) return;
-                Player target = MCinstance.level.getPlayerByUUID(playerUUID);
                 if (target != null)
                     MmdSkinRendererPlayerHelper.CustomAnim(target, data);
                 break;
             }
             case 3: {
-                // 模型选择同步
                 PlayerModelSyncManager.onRemotePlayerModelReceived(playerUUID, data);
                 break;
             }
             case 6: {
-                // 表情同步
-                if (MCinstance.level == null) return;
-                Player target = MCinstance.level.getPlayerByUUID(playerUUID);
                 if (target != null)
-                    MmdSkinRendererPlayerHelper.RemoteMorph(target, data);
+                    MorphSyncHelper.applyRemoteMorph(target, data);
                 break;
             }
             case 7: {
-                // 舞台动画开始
-                if (MCinstance.level == null) return;
-                Player stageTarget = MCinstance.level.getPlayerByUUID(playerUUID);
-                if (stageTarget != null)
-                    MmdSkinRendererPlayerHelper.StageAnim(stageTarget, data);
+                if (target != null)
+                    StageAnimSyncHelper.startStageAnim(target, data);
                 break;
             }
             case 8: {
-                // 舞台动画结束
-                if (MCinstance.level == null) return;
-                Player target = MCinstance.level.getPlayerByUUID(playerUUID);
                 if (target != null)
-                    MmdSkinRendererPlayerHelper.StageAnimEnd(target);
+                    StageAnimSyncHelper.endStageAnim(target);
+                break;
+            }
+            case 9: {
+                if (target != null)
+                    MmdSkinRendererPlayerHelper.StageAudioPlay(target, data);
                 break;
             }
         }

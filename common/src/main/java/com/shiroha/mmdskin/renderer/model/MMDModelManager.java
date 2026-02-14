@@ -2,6 +2,8 @@ package com.shiroha.mmdskin.renderer.model;
 
 import com.shiroha.mmdskin.MmdSkinClient;
 import com.shiroha.mmdskin.NativeFunc;
+import com.shiroha.mmdskin.config.ModelConfigData;
+import com.shiroha.mmdskin.config.ModelConfigManager;
 import com.shiroha.mmdskin.renderer.animation.MMDAnimManager;
 import com.shiroha.mmdskin.renderer.core.EntityAnimState;
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
@@ -91,6 +93,9 @@ public class MMDModelManager {
      * 3. 后台完成 → 下一帧检测到 Future 完成 → 执行 Phase 2（GL 资源创建，在渲染线程）→ 放入缓存
      */
     public static Model GetModel(String modelName, String cacheKey) {
+        // 定期检查延迟清理（从渲染器移至此处，每帧至少调用一次）
+        modelCache.tick(MMDModelManager::disposeModel);
+        
         String fullCacheKey = modelName + "_" + cacheKey;
         
         // 1. 缓存命中
@@ -442,9 +447,36 @@ public class MMDModelManager {
         m.modelName = modelName;
         m.entityData = new EntityAnimState(3);
         
-        model.ResetPhysics();
-        model.ChangeAnim(MMDAnimManager.GetAnimModel(model, "idle"), 0);
+        model.resetPhysics();
+        model.changeAnim(MMDAnimManager.GetAnimModel(model, "idle"), 0);
+        
+        // 恢复保存的材质可见性配置
+        applyMaterialVisibility(model.getModelHandle(), modelName);
+        
         return m;
+    }
+    
+    /**
+     * 应用保存的材质可见性配置到模型
+     */
+    private static void applyMaterialVisibility(long modelHandle, String modelName) {
+        try {
+            ModelConfigData config = ModelConfigManager.getConfig(modelName);
+            if (config.hiddenMaterials.isEmpty()) return;
+            
+            NativeFunc nf = NativeFunc.GetInst();
+            int materialCount = (int) nf.GetMaterialCount(modelHandle);
+            
+            for (int index : config.hiddenMaterials) {
+                if (index >= 0 && index < materialCount) {
+                    nf.SetMaterialVisible(modelHandle, index, false);
+                }
+            }
+            
+            logger.debug("已恢复 {} 个隐藏材质: {}", config.hiddenMaterials.size(), modelName);
+        } catch (Exception e) {
+            logger.warn("恢复材质可见性失败: {}", modelName, e);
+        }
     }
     
     public static void ReloadModel() {
@@ -492,8 +524,8 @@ public class MMDModelManager {
             MMDAnimManager.DeleteModel(model.model);
             
             // 释放 EntityAnimState 资源
-            if (model instanceof ModelWithEntityData med && med.entityData != null) {
-                med.entityData.dispose();
+            if (model.entityData != null) {
+                model.entityData.dispose();
             }
         } catch (Exception e) {
             logger.error("删除模型失败", e);
@@ -502,8 +534,13 @@ public class MMDModelManager {
     
     public static class Model {
         public IMMDModel model;
+        public EntityAnimState entityData;
         String entityName;
         String modelName;
+        
+        public String getModelName() {
+            return modelName;
+        }
         public Properties properties = new Properties();
         boolean isPropertiesLoaded = false;
 
@@ -531,7 +568,8 @@ public class MMDModelManager {
         } 
     }
 
+    /** @deprecated 已合并到 Model，保留为类型别名以兼容 fabric/forge Mixin 引用 */
+    @Deprecated
     public static class ModelWithEntityData extends Model {
-        public EntityAnimState entityData;
     }
 }

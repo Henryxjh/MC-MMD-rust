@@ -1,7 +1,7 @@
 package com.shiroha.mmdskin.renderer.animation;
 
 import com.shiroha.mmdskin.renderer.core.EntityAnimState;
-import com.shiroha.mmdskin.renderer.model.MMDModelManager.ModelWithEntityData;
+import com.shiroha.mmdskin.renderer.model.MMDModelManager.Model;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
@@ -19,7 +19,7 @@ public class AnimationStateManager {
     /**
      * 更新玩家动画状态
      */
-    public static void updateAnimationState(AbstractClientPlayer player, ModelWithEntityData model) {
+    public static void updateAnimationState(AbstractClientPlayer player, Model model) {
         if (model.entityData.playCustomAnim) {
             // 舞台动画不受移动/状态变化影响，只有 StageAnimEnd 才能结束
             if (!model.entityData.playStageAnim && shouldStopCustomAnimation(player)) {
@@ -50,7 +50,7 @@ public class AnimationStateManager {
         return player.getX() - player.xo != 0.0f || player.getZ() - player.zo != 0.0f;
     }
     
-    private static void updateLayer0Animation(AbstractClientPlayer player, ModelWithEntityData model) {
+    private static void updateLayer0Animation(AbstractClientPlayer player, Model model) {
         if (player.getHealth() == 0.0f) {
             changeAnimationOnce(model, EntityAnimState.State.Die, 0);
         } else if (player.isFallFlying()) {
@@ -74,7 +74,7 @@ public class AnimationStateManager {
         }
     }
     
-    private static void updateRidingAnimation(AbstractClientPlayer player, ModelWithEntityData model) {
+    private static void updateRidingAnimation(AbstractClientPlayer player, Model model) {
         var vehicle = player.getVehicle();
         if (vehicle != null && vehicle.getType() == EntityType.HORSE && hasMovement(player)) {
             changeAnimationOnce(model, EntityAnimState.State.OnHorse, 0);
@@ -83,7 +83,7 @@ public class AnimationStateManager {
         }
     }
     
-    private static void updateClimbingAnimation(AbstractClientPlayer player, ModelWithEntityData model) {
+    private static void updateClimbingAnimation(AbstractClientPlayer player, Model model) {
         double verticalMovement = player.getY() - player.yo;
         if (verticalMovement > 0) {
             changeAnimationOnce(model, EntityAnimState.State.OnClimbableUp, 0);
@@ -94,7 +94,7 @@ public class AnimationStateManager {
         }
     }
     
-    private static void updateCrawlingAnimation(AbstractClientPlayer player, ModelWithEntityData model) {
+    private static void updateCrawlingAnimation(AbstractClientPlayer player, Model model) {
         if (hasMovement(player)) {
             changeAnimationOnce(model, EntityAnimState.State.Crawl, 0);
         } else {
@@ -102,18 +102,18 @@ public class AnimationStateManager {
         }
     }
     
-    private static void updateLayer1Animation(AbstractClientPlayer player, ModelWithEntityData model) {
+    private static void updateLayer1Animation(AbstractClientPlayer player, Model model) {
         if ((!player.isUsingItem() && !player.swinging) || player.isSleeping()) {
             if (model.entityData.stateLayers[1] != EntityAnimState.State.Idle) {
                 model.entityData.stateLayers[1] = EntityAnimState.State.Idle;
-                model.model.TransitionAnim(0, 1, TRANSITION_TIME);
+                model.model.transitionAnim(0, 1, TRANSITION_TIME);
             }
         } else {
             updateHandAnimation(player, model);
         }
     }
     
-    private static void updateHandAnimation(AbstractClientPlayer player, ModelWithEntityData model) {
+    private static void updateHandAnimation(AbstractClientPlayer player, Model model) {
         if (player.getUsedItemHand() == InteractionHand.MAIN_HAND && player.isUsingItem()) {
             String itemId = getItemId(player, InteractionHand.MAIN_HAND);
             applyCustomItemAnimation(model, EntityAnimState.State.ItemRight, itemId, "Right", "using", 1);
@@ -129,26 +129,26 @@ public class AnimationStateManager {
         }
     }
     
-    private static void updateLayer2Animation(AbstractClientPlayer player, ModelWithEntityData model) {
+    private static void updateLayer2Animation(AbstractClientPlayer player, Model model) {
         if (player.isShiftKeyDown() && !player.isVisuallyCrawling()) {
             changeAnimationOnce(model, EntityAnimState.State.Sneak, 2);
         } else {
             if (model.entityData.stateLayers[2] != EntityAnimState.State.Idle) {
                 model.entityData.stateLayers[2] = EntityAnimState.State.Idle;
-                model.model.TransitionAnim(0, 2, TRANSITION_TIME);
+                model.model.transitionAnim(0, 2, TRANSITION_TIME);
             }
         }
     }
     
-    private static void changeAnimationOnce(ModelWithEntityData model, EntityAnimState.State targetState, int layer) {
+    private static void changeAnimationOnce(Model model, EntityAnimState.State targetState, int layer) {
         String property = EntityAnimState.getPropertyName(targetState);
         if (model.entityData.stateLayers[layer] != targetState) {
             model.entityData.stateLayers[layer] = targetState;
-            model.model.TransitionAnim(MMDAnimManager.GetAnimModel(model.model, property), layer, TRANSITION_TIME);
+            model.model.transitionAnim(MMDAnimManager.GetAnimModel(model.model, property), layer, TRANSITION_TIME);
         }
     }
     
-    private static void applyCustomItemAnimation(ModelWithEntityData model, EntityAnimState.State targetState, 
+    private static void applyCustomItemAnimation(Model model, EntityAnimState.State targetState, 
                                                   String itemName, String activeHand, String handState, int layer) {
         long anim = MMDAnimManager.GetAnimModel(model.model, 
             String.format("itemActive_%s_%s_%s", itemName, activeHand, handState));
@@ -156,7 +156,7 @@ public class AnimationStateManager {
         if (anim != 0) {
             if (model.entityData.stateLayers[layer] != targetState) {
                 model.entityData.stateLayers[layer] = targetState;
-                model.model.TransitionAnim(anim, layer, TRANSITION_TIME);
+                model.model.transitionAnim(anim, layer, TRANSITION_TIME);
             }
             return;
         }

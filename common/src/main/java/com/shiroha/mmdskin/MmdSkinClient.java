@@ -143,14 +143,14 @@ public class MmdSkinClient {
                 if (!targetFile.getParentFile().exists()){
                     targetFile.getParentFile().mkdirs();
                 }
-                FileOutputStream fos = new FileOutputStream(name);
-                BufferedOutputStream dest = new BufferedOutputStream(fos, BUFFER);
-                while (total + BUFFER <= TOOBIG && (count = zis.read(data, 0, BUFFER)) != -1) {
-                    dest.write(data, 0, count);
-                    total += count;
+                try (FileOutputStream fos = new FileOutputStream(name);
+                     BufferedOutputStream dest = new BufferedOutputStream(fos, BUFFER)) {
+                    while (total + BUFFER <= TOOBIG && (count = zis.read(data, 0, BUFFER)) != -1) {
+                        dest.write(data, 0, count);
+                        total += count;
+                    }
+                    dest.flush();
                 }
-                dest.flush();
-                dest.close();
                 zis.closeEntry();
                 entries++;
                 if (entries > TOOMANY) {

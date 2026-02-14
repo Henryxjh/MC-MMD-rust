@@ -1,6 +1,8 @@
 package com.shiroha.mmdskin.ui.selector;
 
 import com.shiroha.mmdskin.NativeFunc;
+import com.shiroha.mmdskin.config.ModelConfigData;
+import com.shiroha.mmdskin.config.ModelConfigManager;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import com.shiroha.mmdskin.ui.config.ModelSelectorConfig;
 import net.minecraft.client.Minecraft;
@@ -12,7 +14,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 材质可见性控制界面 — 简约右侧面板风格
@@ -43,6 +47,7 @@ public class MaterialVisibilityScreen extends Screen {
     // 模型和材质数据
     private final long modelHandle;
     private final String modelName;
+    private final String configModelName; // 配置持久化用的模型文件夹名
     private final List<MaterialEntry> materials;
     
     // UI 状态
@@ -56,10 +61,11 @@ public class MaterialVisibilityScreen extends Screen {
     private int panelX, panelY, panelH;
     private int listTop, listBottom;
     
-    public MaterialVisibilityScreen(long modelHandle, String modelName) {
+    public MaterialVisibilityScreen(long modelHandle, String modelName, String configModelName) {
         super(Component.literal("材质可见性"));
         this.modelHandle = modelHandle;
         this.modelName = modelName;
+        this.configModelName = configModelName;
         this.materials = new ArrayList<>();
         loadMaterials();
     }
@@ -85,11 +91,7 @@ public class MaterialVisibilityScreen extends Screen {
             return null;
         }
         
-        if (model instanceof MMDModelManager.ModelWithEntityData mwed) {
-            return new MaterialVisibilityScreen(mwed.model.GetModelLong(), modelName);
-        }
-        
-        return null;
+        return new MaterialVisibilityScreen(model.model.getModelHandle(), modelName, modelName);
     }
     
     /**
@@ -104,12 +106,8 @@ public class MaterialVisibilityScreen extends Screen {
             return null;
         }
         
-        if (model instanceof MMDModelManager.ModelWithEntityData mwed) {
-            String displayName = maidName != null ? maidName : "女仆";
-            return new MaterialVisibilityScreen(mwed.model.GetModelLong(), displayName);
-        }
-        
-        return null;
+        String displayName = maidName != null ? maidName : "女仆";
+        return new MaterialVisibilityScreen(model.model.getModelHandle(), displayName, model.getModelName());
     }
     
     /**
@@ -355,6 +353,34 @@ public class MaterialVisibilityScreen extends Screen {
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, delta);
+    }
+    
+    @Override
+    public void onClose() {
+        saveMaterialVisibility();
+        super.onClose();
+    }
+    
+    /**
+     * 保存当前材质可见性状态到模型配置
+     */
+    private void saveMaterialVisibility() {
+        if (configModelName == null || configModelName.isEmpty()) return;
+        
+        try {
+            ModelConfigData config = ModelConfigManager.getConfig(configModelName);
+            Set<Integer> hidden = new HashSet<>();
+            for (MaterialEntry entry : materials) {
+                if (!entry.visible) {
+                    hidden.add(entry.index);
+                }
+            }
+            config.hiddenMaterials = hidden;
+            ModelConfigManager.saveConfig(configModelName, config);
+            logger.debug("材质可见性已保存: {} (隐藏 {})", configModelName, hidden.size());
+        } catch (Exception e) {
+            logger.warn("保存材质可见性失败: {}", configModelName, e);
+        }
     }
     
     @Override

@@ -70,12 +70,12 @@ public class MaidModelSelectorScreen extends Screen {
         modelCards.clear();
         
         // 添加默认选项（使用原版渲染）
-        modelCards.add(new ModelCardEntry(UIConstants.DEFAULT_MODEL_NAME, null));
+        modelCards.add(new ModelCardEntry(UIConstants.DEFAULT_MODEL_NAME));
         
         // 使用 ModelInfo 扫描所有模型
         List<ModelInfo> models = ModelInfo.scanModels();
         for (ModelInfo info : models) {
-            modelCards.add(new ModelCardEntry(info.getFolderName(), info));
+            modelCards.add(new ModelCardEntry(info.getFolderName()));
         }
         
         logger.info("女仆模型选择: 共加载 {} 个模型选项", modelCards.size());
@@ -276,11 +276,9 @@ public class MaidModelSelectorScreen extends Screen {
 
     private static class ModelCardEntry {
         final String displayName;
-        final ModelInfo modelInfo;
 
-        ModelCardEntry(String displayName, ModelInfo modelInfo) {
+        ModelCardEntry(String displayName) {
             this.displayName = displayName;
-            this.modelInfo = modelInfo;
         }
     }
 }

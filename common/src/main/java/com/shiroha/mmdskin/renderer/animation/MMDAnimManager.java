@@ -103,9 +103,9 @@ public class MMDAnimManager {
         String loadedFrom = null;
         
         // 1. 优先从模型目录加载
-        String modelDirFile = GetAnimationFilename(model.GetModelDir(), animName);
+        String modelDirFile = GetAnimationFilename(model.getModelDir(), animName);
         if (new File(modelDirFile).exists()) {
-            anim = nf.LoadAnimation(model.GetModelLong(), modelDirFile);
+            anim = nf.LoadAnimation(model.getModelHandle(), modelDirFile);
             if (anim != 0) {
                 loadedFrom = "模型目录";
             }
@@ -115,7 +115,7 @@ public class MMDAnimManager {
         if (anim == 0) {
             String customFile = GetAnimationFilename(customAnimDir, animName);
             if (new File(customFile).exists()) {
-                anim = nf.LoadAnimation(model.GetModelLong(), customFile);
+                anim = nf.LoadAnimation(model.getModelHandle(), customFile);
                 if (anim != 0) {
                     loadedFrom = "自定义目录";
                 }
@@ -126,7 +126,7 @@ public class MMDAnimManager {
         if (anim == 0) {
             String defaultFile = GetAnimationFilename(defaultAnimDir, animName);
             if (new File(defaultFile).exists()) {
-                anim = nf.LoadAnimation(model.GetModelLong(), defaultFile);
+                anim = nf.LoadAnimation(model.getModelHandle(), defaultFile);
                 if (anim != 0) {
                     loadedFrom = "默认目录";
                 }

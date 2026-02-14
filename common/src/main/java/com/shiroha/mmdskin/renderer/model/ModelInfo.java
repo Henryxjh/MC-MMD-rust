@@ -18,9 +18,9 @@ import java.util.List;
 public class ModelInfo {
     private static final Logger logger = LogManager.getLogger();
     
-    // 扫描结果缓存
-    private static volatile List<ModelInfo> cachedModels = null;
-    private static volatile long cacheTimestamp = 0;
+    // 扫描结果缓存（不可变快照，保证原子性）
+    private record CacheSnapshot(List<ModelInfo> models, long timestamp) {}
+    private static volatile CacheSnapshot cache = null;
     private static final long CACHE_TTL = 5000; // 5 秒缓存有效期
     
     private final String folderName;      // 文件夹名称（用于显示）
@@ -71,11 +71,11 @@ public class ModelInfo {
      * 支持任意名称的 .pmx 和 .pmd 文件
      */
     public static List<ModelInfo> scanModels() {
-        // 检查缓存是否有效
+        // 检查缓存是否有效（单次 volatile 读取，保证原子性）
+        CacheSnapshot snapshot = cache;
         long now = System.currentTimeMillis();
-        List<ModelInfo> cached = cachedModels;
-        if (cached != null && (now - cacheTimestamp) < CACHE_TTL) {
-            return cached;
+        if (snapshot != null && (now - snapshot.timestamp()) < CACHE_TTL) {
+            return snapshot.models();
         }
         
         List<ModelInfo> models = new ArrayList<>();
@@ -104,9 +104,8 @@ public class ModelInfo {
         
         logger.info("共扫描到 {} 个模型", models.size());
         
-        // 更新缓存
-        cachedModels = models;
-        cacheTimestamp = System.currentTimeMillis();
+        // 原子更新缓存（单次 volatile 写入）
+        cache = new CacheSnapshot(models, System.currentTimeMillis());
         
         return models;
     }
@@ -115,8 +114,7 @@ public class ModelInfo {
      * 使缓存失效（下次调用 scanModels 会重新扫描磁盘）
      */
     public static void invalidateCache() {
-        cachedModels = null;
-        cacheTimestamp = 0;
+        cache = null;
     }
     
     /**

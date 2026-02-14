@@ -12,8 +12,10 @@ import com.shiroha.mmdskin.ui.network.MorphWheelNetworkHandler;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import com.shiroha.mmdskin.ui.network.StageNetworkHandler;
 import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
+import com.shiroha.mmdskin.renderer.camera.StageAudioPlayer;
 import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
+import com.shiroha.mmdskin.util.KeyMappingUtil;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.io.File;
 import net.minecraft.client.Minecraft;
@@ -35,6 +37,8 @@ import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.fml.common.Mod;
 
 
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.glfw.GLFW;
@@ -80,6 +84,9 @@ public class MmdSkinRegisterClient {
      * 注册事件监听器到两个事件总线
      */
     public static void Register() {
+        // 注入按键获取逻辑
+        KeyMappingUtil.setBoundKeyGetter(k -> k.getKey());
+
         // 注册到 Forge 事件总线（按键输入、客户端 Tick）
         // 注意：按键注册和实体渲染器注册已由 MmdSkinForgeClient 中的 @SubscribeEvent 处理
         //（RegisterKeyMappingsEvent 和 EntityRenderersEvent 在 FMLClientSetupEvent 之前触发）
@@ -230,13 +237,15 @@ public class MmdSkinRegisterClient {
             
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null) return;
+
+            // 远程舞台音频距离衰减（每秒更新一次）
+            StageAudioPlayer.tickRemoteAttenuation();
             
             // 主配置轮盘按键处理
             if (mc.screen == null || mc.screen instanceof ConfigWheelScreen) {
                 boolean keyDown = keyConfigWheel.isDown();
                 if (keyDown && !configWheelKeyWasDown) {
-                    int keyCode = keyConfigWheel.getKey().getValue();
-                    mc.setScreen(new ConfigWheelScreen(keyCode));
+                    mc.setScreen(new ConfigWheelScreen(keyConfigWheel));
                 }
                 configWheelKeyWasDown = keyDown;
             } else {
@@ -270,8 +279,7 @@ public class MmdSkinRegisterClient {
             String className = target.getClass().getName();
             if (className.contains("EntityMaid") || className.contains("touhoulittlemaid")) {
                 String maidName = target.getName().getString();
-                int keyCode = keyMaidConfigWheel.getKey().getValue();
-                mc.setScreen(new MaidConfigWheelScreen(target.getUUID(), target.getId(), maidName, keyCode));
+                mc.setScreen(new MaidConfigWheelScreen(target.getUUID(), target.getId(), maidName, keyMaidConfigWheel));
                 logger.info("打开女仆配置轮盘: {} (ID: {})", maidName, target.getId());
             }
         }
@@ -290,6 +298,9 @@ public class MmdSkinRegisterClient {
                     logger.info("玩家加入服务器，广播模型选择: {}", selectedModel);
                     PlayerModelSyncManager.broadcastLocalModelSelection(mc.player.getUUID(), selectedModel);
                 }
+                // 请求所有玩家的模型信息
+                MmdSkinRegisterCommon.channel.sendToServer(
+                    new MmdSkinNetworkPack(10, mc.player.getUUID(), ""));
             }
         }
         
@@ -301,6 +312,36 @@ public class MmdSkinRegisterClient {
             MMDCameraController.getInstance().exitStageMode();
             PlayerModelSyncManager.onDisconnect();
             MmdSkinRendererPlayerHelper.onDisconnect();
+        }
+
+        /**
+         * 玩家死亡事件 - 退出舞台模式
+         */
+        @SubscribeEvent
+        public static void onPlayerDeath(LivingDeathEvent event) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player != null && event.getEntity().getUUID().equals(mc.player.getUUID())) {
+                MMDCameraController controller = MMDCameraController.getInstance();
+                if (controller.isInStageMode()) {
+                    logger.info("检测到玩家死亡，正在退出舞台模式以防止视角锁定");
+                    controller.exitStageMode();
+                }
+            }
+        }
+
+        /**
+         * 玩家复活事件 - 确保退出舞台模式
+         */
+        @SubscribeEvent
+        public static void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player != null && event.getEntity().getUUID().equals(mc.player.getUUID())) {
+                MMDCameraController controller = MMDCameraController.getInstance();
+                if (controller.isInStageMode()) {
+                    logger.info("检测到玩家复活，强制退出舞台模式");
+                    controller.exitStageMode();
+                }
+            }
         }
     }
 }

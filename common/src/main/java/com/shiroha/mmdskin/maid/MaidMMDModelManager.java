@@ -117,7 +117,7 @@ public class MaidMMDModelManager {
             
             // 设置默认动画
             IMMDModel mmdModel = model.model;
-            mmdModel.ChangeAnim(MMDAnimManager.GetAnimModel(mmdModel, "idle"), 0);
+            mmdModel.changeAnim(MMDAnimManager.GetAnimModel(mmdModel, "idle"), 0);
             
             logger.info("女仆 {} 模型加载成功: {}", maidUUID, modelName);
         }
@@ -141,7 +141,7 @@ public class MaidMMDModelManager {
         IMMDModel mmdModel = model.model;
         long anim = MMDAnimManager.GetAnimModel(mmdModel, animId);
         if (anim != 0) {
-            mmdModel.TransitionAnim(anim, 0, 0.25f);
+            mmdModel.transitionAnim(anim, 0, 0.25f);
             logger.info("女仆 {} 播放动画: {}", maidUUID, animId);
         } else {
             logger.warn("女仆 {} 动画未找到: {}", maidUUID, animId);

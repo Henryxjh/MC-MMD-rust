@@ -2,18 +2,13 @@ package com.shiroha.mmdskin.renderer.model;
 
 import com.shiroha.mmdskin.MmdSkinClient;
 import com.shiroha.mmdskin.config.ConfigManager;
-import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
-import com.shiroha.mmdskin.renderer.core.EyeTrackingHelper;
-import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.IrisCompat;
-import com.shiroha.mmdskin.renderer.core.RenderContext;
 import com.shiroha.mmdskin.renderer.resource.MMDTextureManager;
 import com.shiroha.mmdskin.renderer.shader.ShaderProvider;
 import com.shiroha.mmdskin.renderer.shader.ToonShaderCpu;
 import com.shiroha.mmdskin.renderer.shader.ToonConfig;
 import com.shiroha.mmdskin.NativeFunc;
 import com.mojang.blaze3d.platform.GlStateManager;
-import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferUploader;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -23,14 +18,7 @@ import java.nio.FloatBuffer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.client.renderer.texture.TextureManager;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.level.LightLayer;
-
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL46C;
 import org.lwjgl.system.MemoryUtil;
@@ -39,9 +27,7 @@ import org.lwjgl.system.MemoryUtil;
  * MMD模型OpenGL渲染实现
  * 负责MMD模型的OpenGL渲染逻辑
  */
-public class MMDModelOpenGL implements IMMDModel {
-    static final Logger logger = LogManager.getLogger();
-    static NativeFunc nf;
+public class MMDModelOpenGL extends AbstractMMDModel {
     static boolean isShaderInited = false;
     static int MMDShaderProgram;
     public static boolean isMMDShaderEnabled = false;
@@ -72,9 +58,6 @@ public class MMDModelOpenGL implements IMMDModel {
     int I_uv0Location, I_uv2Location;
     int I_colorLocation;
 
-    long model;
-    String modelDir;
-    private String cachedModelName;
     int vertexCount;
     ByteBuffer posBuffer, colorBuffer, norBuffer, uv0Buffer, uv1Buffer, uv2Buffer;
     int vertexArrayObject;
@@ -87,35 +70,22 @@ public class MMDModelOpenGL implements IMMDModel {
     int uv2BufferObject;
     int indexElementSize;
     int indexType;
-    Material[] mats;
-    Material lightMapMaterial;
+    MMDMaterial[] mats;
+    MMDMaterial lightMapMaterial;
     final Vector3f light0Direction = new Vector3f();
     final Vector3f light1Direction = new Vector3f();
-    private final Quaternionf tempQuat = new Quaternionf();
-    
-    // 时间追踪（用于计算 deltaTime）
-    private long lastUpdateTime = -1; // -1 表示未初始化
-    private static final float MAX_DELTA_TIME = 0.25f; // 最大 250ms（4FPS），防止暂停后跳跃
     
     private FloatBuffer modelViewMatBuff;          // 预分配的矩阵缓冲区
     private FloatBuffer projMatBuff;
     private FloatBuffer light0Buff;                  // 预分配的光照缓冲区
     private FloatBuffer light1Buff;
-    
-    // 材质 Morph 结果
-    private FloatBuffer materialMorphResultsBuffer;
-    private ByteBuffer materialMorphResultsByteBuffer;
-    private int materialMorphResultCount = 0;
 
     // 性能优化：缓存着色器程序ID，避免每帧重复查询属性位置
     private int cachedShaderProgram = -1;
     // 性能优化：标记是否有 UV Morph，无则跳过每帧 UV 重传
     private boolean hasUvMorph = false;
-    // 性能优化：标记 VBO 是否已预分配，用于 glBufferSubData
-    private boolean vboPreallocated = false;
 
     MMDModelOpenGL() {
-        // 不在这里初始化时间，等第一次 Update 时初始化
     }
 
     public static void InitShader() {
@@ -134,7 +104,7 @@ public class MMDModelOpenGL implements IMMDModel {
     public static MMDModelOpenGL Create(String modelFilename, String modelDir, boolean isPMD, long layerCount) {
         if (!isShaderInited && isMMDShaderEnabled)
             InitShader();
-        if (nf == null) nf = NativeFunc.GetInst();
+        NativeFunc nf = getNf();
         long model;
         if (isPMD)
             model = nf.LoadModelPMD(modelFilename, modelDir, layerCount);
@@ -158,14 +128,14 @@ public class MMDModelOpenGL implements IMMDModel {
     public static MMDModelOpenGL createFromHandle(long model, String modelDir) {
         if (!isShaderInited && isMMDShaderEnabled)
             InitShader();
-        if (nf == null) nf = NativeFunc.GetInst();
+        NativeFunc nf = getNf();
         BufferUploader.reset();
         
         // 资源追踪变量（用于异常时清理）
         int vertexArrayObject = 0, indexBufferObject = 0;
         int positionBufferObject = 0, colorBufferObject = 0, normalBufferObject = 0;
         int uv0BufferObject = 0, uv1BufferObject = 0, uv2BufferObject = 0;
-        MMDModelOpenGL.Material lightMapMaterial = null;
+        MMDMaterial lightMapMaterial = null;
         FloatBuffer modelViewMatBuff = null, projMatBuff = null;
         FloatBuffer light0Buff = null, light1Buff = null;
         FloatBuffer matMorphResultsBuf = null;
@@ -212,9 +182,9 @@ public class MMDModelOpenGL implements IMMDModel {
             };
 
             //Material
-            MMDModelOpenGL.Material[] mats = new MMDModelOpenGL.Material[(int) nf.GetMaterialCount(model)];
+            MMDMaterial[] mats = new MMDMaterial[(int) nf.GetMaterialCount(model)];
             for (int i = 0; i < mats.length; ++i) {
-                mats[i] = new MMDModelOpenGL.Material();
+                mats[i] = new MMDMaterial();
                 String texFilename = nf.GetMaterialTex(model, i);
                 if (!texFilename.isEmpty()) {
                     MMDTextureManager.Texture mgrTex = MMDTextureManager.GetTexture(texFilename);
@@ -226,7 +196,7 @@ public class MMDModelOpenGL implements IMMDModel {
             }
 
             //lightMap
-            lightMapMaterial = new MMDModelOpenGL.Material();
+            lightMapMaterial = new MMDMaterial();
             MMDTextureManager.Texture mgrTex = MMDTextureManager.GetTexture(modelDir + "/lightMap.png");
             if (mgrTex != null) {
                 lightMapMaterial.tex = mgrTex.tex;
@@ -312,7 +282,6 @@ public class MMDModelOpenGL implements IMMDModel {
             result.indexType = indexType;
             result.mats = mats;
             result.lightMapMaterial = lightMapMaterial;
-            result.vboPreallocated = true;
             result.hasUvMorph = nf.GetUvMorphCount(model) > 0;
             
             // 预分配矩阵缓冲区（避免每帧分配）
@@ -373,40 +342,19 @@ public class MMDModelOpenGL implements IMMDModel {
 
     @Override
     public void dispose() {
-        // 防护：避免 double-free 和 use-after-free
-        if (model == 0) return;
-        nf.DeleteModel(model);
-        model = 0;
+        disposeModelHandle();
         
         // 释放预分配的矩阵缓冲区
-        if (modelViewMatBuff != null) {
-            MemoryUtil.memFree(modelViewMatBuff);
-            modelViewMatBuff = null;
-        }
-        if (projMatBuff != null) {
-            MemoryUtil.memFree(projMatBuff);
-            projMatBuff = null;
-        }
-        if (light0Buff != null) {
-            MemoryUtil.memFree(light0Buff);
-            light0Buff = null;
-        }
-        if (light1Buff != null) {
-            MemoryUtil.memFree(light1Buff);
-            light1Buff = null;
-        }
-        if (materialMorphResultsBuffer != null) {
-            MemoryUtil.memFree(materialMorphResultsBuffer);
-            materialMorphResultsBuffer = null;
-        }
-        if (materialMorphResultsByteBuffer != null) {
-            MemoryUtil.memFree(materialMorphResultsByteBuffer);
-            materialMorphResultsByteBuffer = null;
-        }
+        if (modelViewMatBuff != null) { MemoryUtil.memFree(modelViewMatBuff); modelViewMatBuff = null; }
+        if (projMatBuff != null) { MemoryUtil.memFree(projMatBuff); projMatBuff = null; }
+        if (light0Buff != null) { MemoryUtil.memFree(light0Buff); light0Buff = null; }
+        if (light1Buff != null) { MemoryUtil.memFree(light1Buff); light1Buff = null; }
+        disposeMaterialMorphBuffers();
         
         // 释放自建的 lightMap 纹理（来自 MMDTextureManager 的不在此删除）
         if (lightMapMaterial != null && lightMapMaterial.ownsTexture && lightMapMaterial.tex > 0) {
             GL46C.glDeleteTextures(lightMapMaterial.tex);
+            lightMapMaterial.tex = 0;
         }
         
         // 删除 OpenGL 资源
@@ -419,154 +367,20 @@ public class MMDModelOpenGL implements IMMDModel {
         GL46C.glDeleteBuffers(uv1BufferObject);
         GL46C.glDeleteBuffers(uv2BufferObject);
     }
-    
-    @Override
-    public void render(Entity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, float tickDelta, PoseStack mat, int packedLight, RenderContext context) {
-        if (entityIn instanceof LivingEntity && tickDelta != 1.0f) {
-            renderLivingEntity((LivingEntity) entityIn, entityYaw, entityPitch, entityTrans, tickDelta, mat, packedLight, context);
-            return;
-        }
-        Update();
-        RenderModel(entityIn, entityYaw, entityPitch, entityTrans, mat);
-    }
 
-    private void renderLivingEntity(LivingEntity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, float tickDelta, PoseStack mat, int packedLight, RenderContext context) {
-        // 头部角度处理（舞台播放时归零，由 VMD 动画控制）
-        boolean stagePlaying = MMDCameraController.getInstance().isStagePlayingModel(model);
-        if (stagePlaying) {
-            nf.SetHeadAngle(model, 0.0f, 0.0f, 0.0f, context.isWorldScene());
-        } else {
-            float headAngleX = Mth.clamp(entityIn.getXRot(), -50.0f, 50.0f);
-            float headAngleY = (entityYaw - Mth.lerp(tickDelta, entityIn.yHeadRotO, entityIn.yHeadRot)) % 360.0f;
-            if (headAngleY < -180.0f) headAngleY += 360.0f;
-            else if (headAngleY > 180.0f) headAngleY -= 360.0f;
-            headAngleY = Mth.clamp(headAngleY, -80.0f, 80.0f);
-            
-            float pitchRad = headAngleX * ((float)Math.PI / 180F);
-            float yawRad = context.isInventoryScene() ? -headAngleY * ((float)Math.PI / 180F) : headAngleY * ((float)Math.PI / 180F);
-            nf.SetHeadAngle(model, pitchRad, yawRad, 0.0f, context.isWorldScene());
-        }
-        
-        // 使用公共工具类更新眼球追踪（传递模型名称，使用每模型独立配置）
-        if (!stagePlaying) {
-            EyeTrackingHelper.updateEyeTracking(nf, model, entityIn, entityYaw, tickDelta, getModelName());
-        }
-        
-        // 传递实体位置和朝向给物理系统（用于人物移动时的惯性效果）
-        final float MODEL_SCALE = 0.09f;
-        float posX = (float)(Mth.lerp(tickDelta, entityIn.xo, entityIn.getX()) * MODEL_SCALE);
-        float posY = (float)(Mth.lerp(tickDelta, entityIn.yo, entityIn.getY()) * MODEL_SCALE);
-        float posZ = (float)(Mth.lerp(tickDelta, entityIn.zo, entityIn.getZ()) * MODEL_SCALE);
-        float bodyYaw = Mth.lerp(tickDelta, entityIn.yBodyRotO, entityIn.yBodyRot) * ((float) Math.PI / 180F);
-        nf.SetModelPositionAndYaw(model, posX, posY, posZ, bodyYaw);
-        
-        Update();
-        RenderModel(entityIn, entityYaw, entityPitch, entityTrans, mat);
+    @Override
+    protected void onUpdate(float deltaTime) {
+        getNf().UpdateModel(model, deltaTime);
     }
 
     @Override
-    public void ChangeAnim(long anim, long layer) {
-        nf.ChangeModelAnim(model, anim, layer);
-    }
-    
-    @Override
-    public void TransitionAnim(long anim, long layer, float transitionTime) {
-        nf.TransitionLayerTo(model, layer, anim, transitionTime);
-    }
-
-    @Override
-    public void ResetPhysics() {
-        nf.ResetModelPhysics(model);
-    }
-
-    @Override
-    public long GetModelLong() {
-        return model;
-    }
-
-    @Override
-    public String GetModelDir() {
-        return modelDir;
-    }
-    
-    @Override
-    public String getModelName() {
-        if (cachedModelName == null) {
-            cachedModelName = IMMDModel.super.getModelName();
-        }
-        return cachedModelName;
-    }
-
-    /**
-     * 从 Rust 端获取材质 Morph 结果
-     */
-    private void fetchMaterialMorphResults() {
-        if (materialMorphResultCount <= 0 || materialMorphResultsBuffer == null) return;
-        
-        materialMorphResultsByteBuffer.clear();
-        nf.CopyMaterialMorphResultsToBuffer(model, materialMorphResultsByteBuffer);
-        materialMorphResultsBuffer.clear();
-        materialMorphResultsByteBuffer.position(0);
-        materialMorphResultsBuffer.put(materialMorphResultsByteBuffer.asFloatBuffer());
-        materialMorphResultsBuffer.flip();
-    }
-    
-    /**
-     * 计算材质经 Morph 变形后的有效 alpha
-     * 布局：每材质 56 float = mul(28) + add(28)，diffuse.w 在各组偏移 3
-     * 计算：effective = baseAlpha * mul + add
-     */
-    private float getEffectiveMaterialAlpha(int materialIndex, float baseAlpha) {
-        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return baseAlpha;
-        int mulOffset = materialIndex * 56 + 3;
-        int addOffset = materialIndex * 56 + 28 + 3;
-        float mulAlpha = (mulOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(mulOffset) : 1.0f;
-        float addAlpha = (addOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(addOffset) : 0.0f;
-        return baseAlpha * mulAlpha + addAlpha;
-    }
-    
-    void Update() {
-        // 计算真实的 deltaTime（秒）
-        long currentTime = System.currentTimeMillis();
-        
-        // 第一次调用，初始化时间
-        if (lastUpdateTime < 0) {
-            lastUpdateTime = currentTime;
-            return; // 第一帧不更新物理，避免异常大的 deltaTime
-        }
-        
-        float deltaTime = (currentTime - lastUpdateTime) / 1000.0f;
-        lastUpdateTime = currentTime;
-        
-        // 限制 deltaTime 上限，防止暂停后物理爆炸
-        // 注意：不设下限，避免高帧率下动画加速
-        if (deltaTime > MAX_DELTA_TIME) {
-            deltaTime = MAX_DELTA_TIME;
-        }
-        
-        nf.UpdateModel(model, deltaTime);
-    }
-
-    void RenderModel(Entity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, PoseStack deliverStack) {
+    protected void doRenderModel(Entity entityIn, float entityYaw, float entityPitch, Vector3f entityTrans, PoseStack deliverStack, int packedLight) {
         Minecraft MCinstance = Minecraft.getInstance();
-        
-        // 采样玩家位置的环境光照
-        MCinstance.level.updateSkyBrightness();
-        int eyeHeight = (int)(entityIn.getEyeY() - entityIn.getBlockY());
-        int blockLight = entityIn.level().getBrightness(LightLayer.BLOCK, entityIn.blockPosition().above(eyeHeight));
-        int skyLight = entityIn.level().getBrightness(LightLayer.SKY, entityIn.blockPosition().above(eyeHeight));
-        float skyDarken = MCinstance.level.getSkyDarken();
-        
-        // 计算综合光照强度 (0.0 ~ 1.0)
-        // 方块光照直接使用，天空光照需要考虑天空亮度衰减
-        float blockLightFactor = blockLight / 15.0f;
-        float skyLightFactor = (skyLight / 15.0f) * ((15.0f - skyDarken) / 15.0f);
-        // 取两者中较亮的作为最终光照，模拟 Minecraft 的光照混合
-        float lightIntensity = Math.max(blockLightFactor, skyLightFactor);
-        
-        // 设置最低亮度阈值，防止完全黑暗（0.1 = 10% 最低亮度）
-        float minBrightness = 0.1f;
-        lightIntensity = minBrightness + lightIntensity * (1.0f - minBrightness);
+        LightingHelper.LightData light = LightingHelper.sampleLight(entityIn, MCinstance);
+        float lightIntensity = light.intensity();
+        int blockLight = light.blockLight();
+        int skyLight = light.skyLight();
+        float skyDarken = light.skyDarken();
         
         light0Direction.set(1.0f, 0.75f, 0.0f).normalize();
         light1Direction.set(-1.0f, 0.75f, 0.0f).normalize();
@@ -577,7 +391,7 @@ public class MMDModelOpenGL implements IMMDModel {
         deliverStack.mulPose(tempQuat.identity().rotateY(-yawRad));
         deliverStack.mulPose(tempQuat.identity().rotateX(entityPitch*((float)Math.PI / 180F)));
         deliverStack.translate(entityTrans.x, entityTrans.y, entityTrans.z);
-        float baseScale = 0.09f * com.shiroha.mmdskin.config.ModelConfigManager.getConfig(getModelName()).modelScale;
+        float baseScale = getModelScale();
         deliverStack.scale(baseScale, baseScale, baseScale);
         
         // 获取材质 Morph 结果
@@ -1084,17 +898,6 @@ public class MMDModelOpenGL implements IMMDModel {
         BufferUploader.reset();
     }
 
-    static class Material {
-        int tex;
-        boolean hasAlpha;
-        boolean ownsTexture;
-
-        Material() {
-            tex = 0;
-            hasAlpha = false;
-            ownsTexture = false;
-        }
-    }
 
     void updateLocation(int shaderProgram){
         if (shaderProgram == cachedShaderProgram) return;
@@ -1131,56 +934,7 @@ public class MMDModelOpenGL implements IMMDModel {
         I_colorLocation = GlStateManager._glGetAttribLocation(shaderProgram, "iris_Color");
     }
 
-    public void setUniforms(ShaderInstance shader, PoseStack deliverStack){
-        if(shader.MODEL_VIEW_MATRIX != null)
-            shader.MODEL_VIEW_MATRIX.set(deliverStack.last().pose());
-
-        if(shader.PROJECTION_MATRIX != null)
-            shader.PROJECTION_MATRIX.set(RenderSystem.getProjectionMatrix());
-
-        if(shader.INVERSE_VIEW_ROTATION_MATRIX != null)
-            shader.INVERSE_VIEW_ROTATION_MATRIX.set(RenderSystem.getInverseViewRotationMatrix());
-
-        if(shader.COLOR_MODULATOR != null)
-            shader.COLOR_MODULATOR.set(RenderSystem.getShaderColor());
-
-        if(shader.LIGHT0_DIRECTION != null)
-            shader.LIGHT0_DIRECTION.set(light0Direction);
-
-        if(shader.LIGHT1_DIRECTION != null)
-            shader.LIGHT1_DIRECTION.set(light1Direction);
-
-        if(shader.FOG_START != null)
-            shader.FOG_START.set(RenderSystem.getShaderFogStart());
-
-        if(shader.FOG_END != null)
-            shader.FOG_END.set(RenderSystem.getShaderFogEnd());
-
-        if(shader.FOG_COLOR != null)
-            shader.FOG_COLOR.set(RenderSystem.getShaderFogColor());
-
-        if(shader.FOG_SHAPE != null)
-            shader.FOG_SHAPE.set(RenderSystem.getShaderFogShape().getIndex());
-
-        if (shader.TEXTURE_MATRIX != null) 
-            shader.TEXTURE_MATRIX.set(RenderSystem.getTextureMatrix());
-
-        if (shader.GAME_TIME != null) 
-            shader.GAME_TIME.set(RenderSystem.getShaderGameTime());
-
-        if (shader.SCREEN_SIZE != null) {
-            Window window = Minecraft.getInstance().getWindow();
-            shader.SCREEN_SIZE.set((float)window.getScreenWidth(), (float)window.getScreenHeight());
-        }
-        if (shader.LINE_WIDTH != null) 
-            shader.LINE_WIDTH.set(RenderSystem.getShaderLineWidth());
-
-        shader.setSampler("Sampler1", lightMapMaterial.tex);
-        shader.setSampler("Sampler2", lightMapMaterial.tex);
-        
-        // Iris 兼容：ExtendedShader.apply() 从 RenderSystem.getShaderTexture() 读取纹理，
-        // 而非 shader.setSampler() 设置的值，需要同步设置
-        RenderSystem.setShaderTexture(1, lightMapMaterial.tex);
-        RenderSystem.setShaderTexture(2, lightMapMaterial.tex);
+    public void setUniforms(ShaderInstance shader, PoseStack deliverStack) {
+        setupShaderUniforms(shader, deliverStack, light0Direction, light1Direction, lightMapMaterial.tex);
     }
 }

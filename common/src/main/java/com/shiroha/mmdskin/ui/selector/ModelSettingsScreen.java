@@ -124,7 +124,7 @@ public class ModelSettingsScreen extends Screen {
         MMDModelManager.Model model = MMDModelManager.GetModel(selectedModel, playerName);
         if (model == null) return;
         
-        long handle = model.model.GetModelLong();
+        long handle = model.model.getModelHandle();
         NativeFunc nf = NativeFunc.GetInst();
         
         nf.SetEyeTrackingEnabled(handle, config.eyeTrackingEnabled);

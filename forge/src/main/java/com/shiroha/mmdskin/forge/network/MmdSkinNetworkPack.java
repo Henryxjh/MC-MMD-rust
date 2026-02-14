@@ -6,6 +6,8 @@ import java.util.function.Supplier;
 import com.shiroha.mmdskin.forge.register.MmdSkinRegisterCommon;
 import com.shiroha.mmdskin.maid.MaidMMDModelManager;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRendererPlayerHelper;
+import com.shiroha.mmdskin.renderer.render.MorphSyncHelper;
+import com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
@@ -69,9 +71,9 @@ public class MmdSkinNetworkPack {
         playerUUID = new UUID(buffer.readLong(), buffer.readLong());
         
         // 根据 opCode 决定读取字符串还是整数
-        if (opCode == 1 || opCode == 3 || opCode == 6 || opCode == 7 || opCode == 8) {
+        if (opCode == 1 || opCode == 3 || opCode == 6 || opCode == 7 || opCode == 8 || opCode == 9 || opCode == 10) {
             // opCode 1: 动作执行, opCode 3: 模型选择同步, opCode 6: 表情同步
-            // opCode 7: 舞台开始, opCode 8: 舞台结束
+            // opCode 7: 舞台开始, opCode 8: 舞台结束, opCode 9: 舞台音频, opCode 10: 请求模型信息
             animId = buffer.readUtf();
             arg0 = 0;
         } else if (opCode == 4 || opCode == 5) {
@@ -92,9 +94,9 @@ public class MmdSkinNetworkPack {
         buffer.writeLong(playerUUID.getLeastSignificantBits());
         
         // 根据 opCode 决定写入字符串还是整数
-        if (opCode == 1 || opCode == 3 || opCode == 6 || opCode == 7 || opCode == 8) {
+        if (opCode == 1 || opCode == 3 || opCode == 6 || opCode == 7 || opCode == 8 || opCode == 9 || opCode == 10) {
             // opCode 1: 动作执行, opCode 3: 模型选择同步, opCode 6: 表情同步
-            // opCode 7: 舞台开始, opCode 8: 舞台结束
+            // opCode 7: 舞台开始, opCode 8: 舞台结束, opCode 9: 舞台音频, opCode 10: 请求模型信息
             buffer.writeUtf(animId);
         } else if (opCode == 4 || opCode == 5) {
             buffer.writeInt(arg0);   // 女仆模型/动作变更，写入 entityId
@@ -169,19 +171,25 @@ public class MmdSkinNetworkPack {
             case 6: {
                 // 表情同步
                 if (target != null)
-                    MmdSkinRendererPlayerHelper.RemoteMorph(target, animId);
+                    MorphSyncHelper.applyRemoteMorph(target, animId);
                 break;
             }
             case 7: {
                 // 舞台动画开始
                 if (target != null)
-                    MmdSkinRendererPlayerHelper.StageAnim(target, animId);
+                    StageAnimSyncHelper.startStageAnim(target, animId);
                 break;
             }
             case 8: {
                 // 舞台动画结束
                 if (target != null)
-                    MmdSkinRendererPlayerHelper.StageAnimEnd(target);
+                    StageAnimSyncHelper.endStageAnim(target);
+                break;
+            }
+            case 9: {
+                // 舞台音频同步
+                if (target != null)
+                    MmdSkinRendererPlayerHelper.StageAudioPlay(target, animId);
                 break;
             }
         }
