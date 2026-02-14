@@ -1066,6 +1066,83 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
     }
     
     @Override
+    public long getVramUsage() {
+        if (!initialized) return 0;
+        NativeFunc nf = getNf();
+        long total = 0;
+        int indexCount = (int) nf.GetIndexCount(model);
+        // IBO
+        total += (long) indexCount * indexElementSize;
+        // pos + normal + uv0 VBO（静态输入）
+        total += (long) vertexCount * 12 * 2;
+        total += (long) vertexCount * 8;
+        // boneIdx + boneWgt VBO
+        total += (long) vertexCount * 16 * 2;
+        // color + uv1 + uv2 VBO
+        total += (long) vertexCount * 16;
+        total += (long) vertexCount * 8 * 2;
+        // Compute Shader 输出 SSBO（skinned pos + skinned nor）
+        total += (long) vertexCount * 12 * 2;
+        // Bone matrix SSBO（固定分配 MAX_BONES 大小）
+        total += (long) ShaderConstants.MAX_BONES * 64;
+        // Morph SSBOs（使用 JNI 精确查询实际分配大小）
+        if (vertexMorphCount > 0) {
+            total += nf.GetGpuMorphOffsetsSize(model); // offsets
+            total += (long) vertexMorphCount * 4;       // weights
+        }
+        // UV Morph SSBOs
+        if (uvMorphCount > 0) {
+            total += nf.GetGpuUvMorphOffsetsSize(model); // offsets
+            total += (long) uvMorphCount * 4;             // weights
+        }
+        // Skinned UV buffer（无论是否有 UV Morph 都会分配）
+        if (skinnedUvBuffer > 0) {
+            total += (long) vertexCount * 8;
+        }
+        return total;
+    }
+    
+    @Override
+    public long getRamUsage() {
+        if (!initialized) return 0;
+        long rustRam = getNf().GetModelMemoryUsage(model);
+        // Java 侧堆外内存：6 个逐顶点 ByteBuffer
+        long javaRam = (long) vertexCount * 64; // pos(12)+nor(12)+uv0(8)+color(16)+uv1(8)+uv2(8)
+        // MemoryUtil 预分配缓冲区
+        javaRam += 128; // modelViewMat(64)+projMat(64)
+        // 骨骼矩阵缓冲区（FloatBuffer + ByteBuffer）
+        if (boneMatricesBuffer != null) {
+            javaRam += (long) boneMatricesBuffer.capacity() * 4;
+        }
+        if (boneMatricesByteBuffer != null) {
+            javaRam += boneMatricesByteBuffer.capacity();
+        }
+        // Morph 权重缓冲区
+        if (morphWeightsBuffer != null) {
+            javaRam += (long) morphWeightsBuffer.capacity() * 4;
+        }
+        if (morphWeightsByteBuffer != null) {
+            javaRam += morphWeightsByteBuffer.capacity();
+        }
+        // UV Morph 权重缓冲区
+        if (uvMorphWeightsBuffer != null) {
+            javaRam += (long) uvMorphWeightsBuffer.capacity() * 4;
+        }
+        if (uvMorphWeightsByteBuffer != null) {
+            javaRam += uvMorphWeightsByteBuffer.capacity();
+        }
+        // 材质 Morph 缓冲区
+        if (materialMorphResultCount > 0) {
+            javaRam += (long) materialMorphResultCount * 56 * 4 * 2;
+        }
+        // 子网格元数据缓冲区
+        if (subMeshDataBuf != null) {
+            javaRam += subMeshDataBuf.capacity();
+        }
+        return rustRam + javaRam;
+    }
+    
+    @Override
     public void dispose() {
         if (!initialized) return;
         initialized = false;

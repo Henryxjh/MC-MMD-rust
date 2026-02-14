@@ -17,11 +17,16 @@ import com.shiroha.mmdskin.maid.MaidMMDModelManager;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.logging.log4j.LogManager;
@@ -74,6 +79,12 @@ public class MMDModelManager {
     
     /** 加载代次：每次 cancel 时递增，后台任务完成后检查代次是否匹配，不匹配则自行清理句柄 */
     private static final AtomicLong loadGeneration = new AtomicLong(0);
+    
+    // ===== 累计统计（供 PerformanceHud 使用）=====
+    private static final AtomicInteger totalModelsLoaded = new AtomicInteger(0);
+
+    /** 获取自启动以来累计加载的模型总数 */
+    public static int getTotalModelsLoaded() { return totalModelsLoaded.get(); }
 
     public static void Init() {
         // 先注册工厂，再初始化 RenderModeManager
@@ -270,6 +281,7 @@ public class MMDModelManager {
             MMDAnimManager.AddModel(m);
             Model model = createModelWrapper(fullCacheKey, m, result.modelName);
             modelCache.put(fullCacheKey, model);
+            totalModelsLoaded.incrementAndGet();
             
             long elapsed = System.currentTimeMillis() - startTime;
             logger.info("[异步加载] GL 资源创建完成 ({}ms): {} (缓存: {})", elapsed, fullCacheKey, modelCache.size());
@@ -512,6 +524,34 @@ public class MMDModelManager {
      */
     public static int getPendingLoadCount() {
         return pendingLoads.size();
+    }
+    
+    /**
+     * 获取所有已加载模型的快照列表（供 PerformanceHud 使用）
+     * 合并 modelCache 和 MaidMMDModelManager 两个来源，按模型句柄去重
+     */
+    public static List<Model> getLoadedModels() {
+        Set<Long> seen = new HashSet<>();
+        List<Model> result = new ArrayList<>();
+        // 主缓存（玩家模型 + 首次加载的女仆模型）
+        if (modelCache != null) {
+            modelCache.forEach((key, entry) -> {
+                long handle = entry.value.model.getModelHandle();
+                if (handle != 0 && seen.add(handle)) {
+                    result.add(entry.value);
+                }
+            });
+        }
+        // 女仆模型管理器（可能持有已从主缓存驱逐但仍在使用的模型）
+        for (Model m : com.shiroha.mmdskin.maid.MaidMMDModelManager.getLoadedMaidModels()) {
+            if (m != null && m.model != null) {
+                long handle = m.model.getModelHandle();
+                if (handle != 0 && seen.add(handle)) {
+                    result.add(m);
+                }
+            }
+        }
+        return result;
     }
 
     /**

@@ -26,4 +26,7 @@ public interface IRenderConfig {
 
     /** 第一人称相机上下偏移（默认 0.0） */
     default float getFirstPersonCameraVerticalOffset() { return 0.0f; }
+
+    /** 性能调试 HUD 是否启用（默认 false） */
+    default boolean isDebugHudEnabled() { return false; }
 }

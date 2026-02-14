@@ -123,6 +123,7 @@ public class MMDTextureManager {
             result = new Texture();
             result.tex = tex;
             result.hasAlpha = hasAlpha;
+            result.vramSize = (long) x * y * (hasAlpha ? 4 : 3);
             textures.put(filename, result);
         }
         return result;
@@ -155,6 +156,7 @@ public class MMDTextureManager {
         Texture result = new Texture();
         result.tex = tex;
         result.hasAlpha = predecoded.hasAlpha;
+        result.vramSize = (long) predecoded.width * predecoded.height * (predecoded.hasAlpha ? 4 : 3);
         return result;
     }
 
@@ -189,6 +191,23 @@ public class MMDTextureManager {
     public static class Texture {
         public int tex;
         public boolean hasAlpha;
+        /** 纹理在 GPU 上的显存占用（字节） */
+        public long vramSize;
+    }
+    
+    /** 获取所有已加载纹理的总显存占用（字节） */
+    public static long getTotalTextureVram() {
+        if (textures == null) return 0;
+        long total = 0;
+        for (Texture tex : textures.values()) {
+            total += tex.vramSize;
+        }
+        return total;
+    }
+    
+    /** 获取已加载纹理数量 */
+    public static int getTextureCount() {
+        return textures != null ? textures.size() : 0;
     }
     
     /** 后台线程预解码的纹理数据（像素数据 + 尺寸，尚未上传到 GL） */

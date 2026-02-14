@@ -2811,3 +2811,23 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_BuildMCVertexBuffer(
         0
     }
 }
+
+// ============================================================================
+// 内存统计
+// ============================================================================
+
+/// 获取模型在 Rust 堆上的内存占用（字节）
+#[no_mangle]
+pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetModelMemoryUsage(
+    _env: JNIEnv,
+    _class: JClass,
+    model: jlong,
+) -> jlong {
+    let models = MODELS.read().unwrap();
+    if let Some(model_arc) = models.get(&model) {
+        let m = model_arc.lock().unwrap();
+        m.memory_usage() as jlong
+    } else {
+        0
+    }
+}

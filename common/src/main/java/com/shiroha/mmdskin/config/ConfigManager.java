@@ -201,6 +201,15 @@ public class ConfigManager {
         return provider != null ? provider.getFirstPersonCameraVerticalOffset() : 0.0f;
     }
     
+    // ==================== 调试设置 ====================
+    
+    /**
+     * 获取性能调试 HUD 启用状态
+     */
+    public static boolean isDebugHudEnabled() {
+        return provider != null ? provider.isDebugHudEnabled() : false;
+    }
+    
     /**
      * 配置提供者接口（组合接口）
      * 继承 IRenderConfig / IToonConfig / IPhysicsConfig 三个子接口，

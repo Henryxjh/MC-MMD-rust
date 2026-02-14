@@ -7,6 +7,7 @@ import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -175,5 +176,12 @@ public class MaidMMDModelManager {
      */
     public static int getBindingCount() {
         return maidModelBindings.size();
+    }
+    
+    /**
+     * 获取所有已加载的女仆模型快照（供 PerformanceHud 使用）
+     */
+    public static Collection<MMDModelManager.Model> getLoadedMaidModels() {
+        return loadedModels.values();
     }
 }

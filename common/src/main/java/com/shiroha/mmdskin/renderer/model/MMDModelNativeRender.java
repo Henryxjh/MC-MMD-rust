@@ -188,6 +188,35 @@ public class MMDModelNativeRender extends AbstractMMDModel {
     }
     
     @Override
+    public long getVramUsage() {
+        if (model == 0 || subMeshVBOs == null) return 0;
+        long total = 0;
+        NativeFunc nf = getNf();
+        // 每个子网格的预分配 VBO（顶点数 × 36 字节 MC NEW_ENTITY 格式）
+        for (int i = 0; i < subMeshCount; i++) {
+            total += (long) nf.GetSubMeshVertexCount(model, i) * 36;
+        }
+        return total;
+    }
+    
+    @Override
+    public long getRamUsage() {
+        if (model == 0) return 0;
+        long rustRam = getNf().GetModelMemoryUsage(model);
+        long javaRam = 0;
+        // MemoryUtil 预分配缓冲区
+        if (mcVertexBuf != null) javaRam += mcVertexBuf.capacity();
+        if (poseMatBuf != null) javaRam += poseMatBuf.capacity();     // 64
+        if (normalMatBuf != null) javaRam += normalMatBuf.capacity(); // 36
+        if (subMeshDataBuf != null) javaRam += subMeshDataBuf.capacity();
+        // 材质 Morph 缓冲区
+        if (materialMorphResultCount > 0) {
+            javaRam += (long) materialMorphResultCount * 56 * 4 * 2;
+        }
+        return rustRam + javaRam;
+    }
+    
+    @Override
     public void dispose() {
         if (model == 0) return;
         if (mcVertexBuf != null) { MemoryUtil.memFree(mcVertexBuf); mcVertexBuf = null; }

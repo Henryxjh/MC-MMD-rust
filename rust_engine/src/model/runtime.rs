@@ -1933,6 +1933,74 @@ impl MmdModel {
             String::from("{\"error\": \"no physics\"}")
         }
     }
+    
+    /// 计算模型在 Rust 堆上的内存占用（字节）
+    /// 遍历所有 Vec 的 capacity × 元素大小，精度约 95%+
+    pub fn memory_usage(&self) -> u64 {
+        use std::mem::size_of;
+        let mut total: u64 = 0;
+        
+        // 静态数据
+        total += (self.vertices.capacity() * size_of::<RuntimeVertex>()) as u64;
+        total += (self.indices.capacity() * size_of::<u32>()) as u64;
+        total += (self.weights.capacity() * size_of::<VertexWeight>()) as u64;
+        total += (self.materials.capacity() * size_of::<MmdMaterial>()) as u64;
+        total += (self.submeshes.capacity() * size_of::<SubMesh>()) as u64;
+        // texture_paths: 每个 String 有堆分配
+        for s in &self.texture_paths {
+            total += s.capacity() as u64;
+        }
+        total += (self.texture_paths.capacity() * size_of::<String>()) as u64;
+        
+        // PMX 原始数据（刚体/关节）
+        total += (self.rigid_bodies.capacity() * size_of::<mmd::pmx::rigid_body::RigidBody>()) as u64;
+        total += (self.joints.capacity() * size_of::<mmd::pmx::joint::Joint>()) as u64;
+        
+        // 运行时更新缓冲区
+        total += (self.update_positions.capacity() * size_of::<Vec3>()) as u64;
+        total += (self.update_normals.capacity() * size_of::<Vec3>()) as u64;
+        total += (self.update_uvs.capacity() * size_of::<Vec2>()) as u64;
+        total += (self.update_positions_raw.capacity() * size_of::<f32>()) as u64;
+        total += (self.update_normals_raw.capacity() * size_of::<f32>()) as u64;
+        total += (self.update_uvs_raw.capacity() * size_of::<f32>()) as u64;
+        
+        // GPU 蒙皮缓冲区
+        total += (self.bone_indices.capacity() * size_of::<i32>()) as u64;
+        total += (self.bone_weights.capacity() * size_of::<f32>()) as u64;
+        total += (self.original_positions.capacity() * size_of::<f32>()) as u64;
+        total += (self.original_normals.capacity() * size_of::<f32>()) as u64;
+        
+        // GPU Morph 缓冲区（可能非常大）
+        total += (self.gpu_morph_offsets.capacity() * size_of::<f32>()) as u64;
+        total += (self.gpu_morph_weights.capacity() * size_of::<f32>()) as u64;
+        total += (self.vertex_morph_indices.capacity() * size_of::<usize>()) as u64;
+        
+        // GPU UV Morph 缓冲区
+        total += (self.gpu_uv_morph_offsets.capacity() * size_of::<f32>()) as u64;
+        total += (self.gpu_uv_morph_weights.capacity() * size_of::<f32>()) as u64;
+        total += (self.uv_morph_indices.capacity() * size_of::<usize>()) as u64;
+        
+        // 材质 Morph 结果缓存
+        total += (self.material_morph_results_flat_cache.capacity() * size_of::<f32>()) as u64;
+        
+        // 物理缓冲区
+        total += (self.physics_bone_transforms_buf.capacity() * size_of::<Mat4>()) as u64;
+        total += (self.transition_matrices.capacity() * size_of::<Mat4>()) as u64;
+        
+        // 材质可见性
+        total += (self.material_visible.capacity() * size_of::<bool>()) as u64;
+        total += (self.material_visible_backup.capacity() * size_of::<bool>()) as u64;
+        total += (self.head_submesh_flags.capacity() * size_of::<bool>()) as u64;
+        
+        // 子系统估算
+        total += self.bone_manager.memory_usage();
+        total += self.morph_manager.memory_usage();
+        
+        // VPD 骨骼覆盖
+        total += (self.vpd_bone_overrides.capacity() * (size_of::<usize>() + size_of::<(Vec3, Quat)>())) as u64;
+        
+        total
+    }
 }
 
 impl Default for MmdModel {

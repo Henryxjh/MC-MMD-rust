@@ -342,6 +342,19 @@ public class ModConfigScreen {
             .setSaveConsumer(value -> data.physicsDebugLog = value)
             .build());
         
+        // ==================== 调试设置分类 ====================
+        ConfigCategory debugCategory = builder.getOrCreateCategory(
+            Component.translatable("gui.mmdskin.mod_settings.category.debug"));
+        
+        debugCategory.addEntry(entryBuilder
+            .startBooleanToggle(
+                Component.translatable("gui.mmdskin.mod_settings.debug_hud"),
+                data.debugHudEnabled)
+            .setDefaultValue(false)
+            .setTooltip(Component.translatable("gui.mmdskin.mod_settings.debug_hud.tooltip"))
+            .setSaveConsumer(value -> data.debugHudEnabled = value)
+            .build());
+        
         builder.setSavingRunnable(() -> {
             MmdSkinConfig.save();
             // 同步渲染模式设置到工厂

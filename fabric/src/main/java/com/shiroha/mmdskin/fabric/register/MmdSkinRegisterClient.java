@@ -239,6 +239,11 @@ public class MmdSkinRegisterClient {
             MmdSkinRendererPlayerHelper.onDisconnect();
         });
         
+        // 注册性能调试 HUD 渲染
+        net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
+            (graphics, tickDelta) -> com.shiroha.mmdskin.renderer.core.PerformanceHud.render(graphics)
+        );
+        
         logger.info("MMD Skin 客户端注册完成");
     }
     

@@ -369,6 +369,36 @@ public class MMDModelOpenGL extends AbstractMMDModel {
     }
 
     @Override
+    public long getVramUsage() {
+        long total = 0;
+        // IBO
+        int indexCount = (int) getNf().GetIndexCount(model);
+        total += (long) indexCount * indexElementSize;
+        // pos + normal VBO (dynamic)
+        total += (long) vertexCount * 12 * 2;
+        // color VBO (static)
+        total += (long) vertexCount * 16;
+        // uv0 + uv1 + uv2 VBO
+        total += (long) vertexCount * 8 * 3;
+        return total;
+    }
+    
+    @Override
+    public long getRamUsage() {
+        if (model == 0) return 0;
+        long rustRam = getNf().GetModelMemoryUsage(model);
+        // Java 侧堆外内存：6 个逐顶点 ByteBuffer
+        long javaRam = (long) vertexCount * 64; // pos(12)+color(16)+nor(12)+uv0(8)+uv1(8)+uv2(8)
+        // MemoryUtil 预分配缓冲区
+        javaRam += 152; // modelViewMat(64)+projMat(64)+light0(12)+light1(12)
+        // 材质 Morph 缓冲区
+        if (materialMorphResultCount > 0) {
+            javaRam += (long) materialMorphResultCount * 56 * 4 * 2;
+        }
+        return rustRam + javaRam;
+    }
+    
+    @Override
     protected void onUpdate(float deltaTime) {
         getNf().UpdateModel(model, deltaTime);
     }

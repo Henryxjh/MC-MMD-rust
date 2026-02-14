@@ -62,6 +62,9 @@ public class ConfigData {
     public float firstPersonCameraForwardOffset = 0.0f;
     public float firstPersonCameraVerticalOffset = 0.0f;
     
+    // 调试
+    public boolean debugHudEnabled = false;
+    
     /**
      * 从文件加载配置
      */

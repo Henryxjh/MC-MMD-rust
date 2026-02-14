@@ -752,4 +752,13 @@ public class NativeFunc {
      * @param out 输出数组 [x, y, z]，长度至少为 3
      */
     public native void GetEyeBonePosition(long model, float[] out);
+    
+    // ==================== 内存统计 ====================
+    
+    /**
+     * 获取模型在 Rust 堆上的内存占用（字节）
+     * @param model 模型句柄
+     * @return 内存占用字节数
+     */
+    public native long GetModelMemoryUsage(long model);
 }

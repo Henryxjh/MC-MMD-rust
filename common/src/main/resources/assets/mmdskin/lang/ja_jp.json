@@ -99,5 +99,9 @@
   "gui.mmdskin.stage.cinematic": "シネマモード",
   "gui.mmdskin.stage.start": "開始",
   "gui.mmdskin.stage.esc_hint": "もう一度 ESC を押すとダンス終了",
-  "gui.mmdskin.stage.mouse_released": "マウス解放済み — 右クリックで復帰"
+  "gui.mmdskin.stage.mouse_released": "\u30de\u30a6\u30b9\u89e3\u653e\u6e08\u307f \u2014 \u53f3\u30af\u30ea\u30c3\u30af\u3067\u5fa9\u5e30",
+  
+  "gui.mmdskin.mod_settings.category.debug": "\u30c7\u30d0\u30c3\u30b0\u8a2d\u5b9a",
+  "gui.mmdskin.mod_settings.debug_hud": "\u30d1\u30d5\u30a9\u30fc\u30de\u30f3\u30b9\u30c7\u30d0\u30c3\u30b0HUD",
+  "gui.mmdskin.mod_settings.debug_hud.tooltip": "\u753b\u9762\u5de6\u4e0a\u306b\u30e2\u30c7\u30eb\u306e\u30e1\u30e2\u30ea/VRAM\u4f7f\u7528\u91cf\u3092\u8868\u793a"
 }
