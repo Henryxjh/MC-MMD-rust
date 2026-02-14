@@ -1256,6 +1256,23 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_GetLayerMaxFrame(
     0.0
 }
 
+/// 设置动画层是否循环播放
+/// loop_play: true=循环，false=播放到尾帧后停留
+#[no_mangle]
+pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetLayerLoop(
+    _env: JNIEnv,
+    _class: JClass,
+    model: jlong,
+    layer: jlong,
+    loop_play: jboolean,
+) {
+    let models = MODELS.read().unwrap();
+    if let Some(model_arc) = models.get(&model) {
+        let mut model = model_arc.lock().unwrap();
+        model.set_layer_loop(layer as usize, loop_play != 0);
+    }
+}
+
 // ============================================================================
 // 纹理相关函数
 // ============================================================================

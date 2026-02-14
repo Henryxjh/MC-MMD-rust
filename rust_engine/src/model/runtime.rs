@@ -751,6 +751,11 @@ impl MmdModel {
         self.animation_layer_manager.set_layer_speed(layer_id, speed);
     }
 
+    /// 设置层是否循环播放
+    pub fn set_layer_loop(&mut self, layer_id: usize, loop_play: bool) {
+        self.animation_layer_manager.set_layer_loop(layer_id, loop_play);
+    }
+
     /// 跳转到指定帧
     pub fn seek_layer(&mut self, layer_id: usize, frame: f32) {
         self.animation_layer_manager.seek_layer(layer_id, frame);
