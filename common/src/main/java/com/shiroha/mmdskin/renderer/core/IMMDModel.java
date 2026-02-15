@@ -46,6 +46,14 @@ public interface IMMDModel {
     void transitionAnim(long anim, long layer, float transitionTime);
 
     /**
+     * 设置动画层是否循环播放
+     * 
+     * @param layer 动画层
+     * @param loop true=循环，false=播放到尾帧后停留
+     */
+    default void setLayerLoop(long layer, boolean loop) {}
+
+    /**
      * 重置物理模拟
      */
     void resetPhysics();
@@ -78,4 +86,22 @@ public interface IMMDModel {
      * 实现类应在此方法中清理所有资源
      */
     void dispose();
+    
+    /**
+     * 获取模型 VRAM 占用（字节）
+     * 包括 GL 缓冲区（VBO/IBO/SSBO）的显存占用，不含纹理
+     */
+    default long getVramUsage() { return 0; }
+    
+    /**
+     * 获取模型 RAM 占用（字节）
+     * 包括 Rust 原生堆内存 + Java 侧堆外缓冲区（ByteBuffer/FloatBuffer）
+     */
+    default long getRamUsage() {
+        try {
+            return com.shiroha.mmdskin.NativeFunc.GetInst().GetModelMemoryUsage(getModelHandle());
+        } catch (Exception e) {
+            return 0;
+        }
+    }
 }

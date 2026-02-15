@@ -7,6 +7,7 @@ import org.apache.logging.log4j.Logger;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -59,10 +60,16 @@ public class AnimationInfo extends AbstractAssetInfo<AnimationInfo.AnimSource> {
             File[] modelDirs = entityPlayerDir.listFiles(File::isDirectory);
             if (modelDirs != null) {
                 for (File modelDir : modelDirs) {
+                    // 扫描 anims/ 子文件夹（优先）
+                    File animsSubDir = new File(modelDir, PathConstants.MODEL_ANIMS_DIR);
+                    list.addAll(scanDirectory(animsSubDir, EXTENSION, AnimSource.MODEL, modelDir.getName(), FACTORY));
+                    // 扫描模型根目录（向后兼容）
                     list.addAll(scanDirectory(modelDir, EXTENSION, AnimSource.MODEL, modelDir.getName(), FACTORY));
                 }
             }
         }
+        // 去重（anims/ 和根目录可能有同名文件）
+        list = new ArrayList<>(new LinkedHashSet<>(list));
         sortBySourceAndName(list);
         logger.info("共扫描到 {} 个动画文件", list.size());
         return list;
@@ -81,10 +88,15 @@ public class AnimationInfo extends AbstractAssetInfo<AnimationInfo.AnimSource> {
     public static List<AnimationInfo> scanAnimationsForModel(String modelName) {
         List<AnimationInfo> list = new ArrayList<>();
         if (modelName != null && !modelName.isEmpty()) {
+            // anims/ 子文件夹优先
+            list.addAll(scanDirectory(PathConstants.getModelAnimsDir(modelName), EXTENSION, AnimSource.MODEL, modelName, FACTORY));
+            // 模型根目录（向后兼容）
             list.addAll(scanDirectory(PathConstants.getModelDir(modelName), EXTENSION, AnimSource.MODEL, modelName, FACTORY));
         }
         list.addAll(scanDirectory(PathConstants.getCustomAnimDir(), EXTENSION, AnimSource.CUSTOM, null, FACTORY));
         list.addAll(scanDirectory(PathConstants.getDefaultAnimDir(), EXTENSION, AnimSource.DEFAULT, null, FACTORY));
+        // 去重（anims/ 和根目录可能有同名文件）
+        list = new ArrayList<>(new LinkedHashSet<>(list));
         sortBySourceAndName(list);
         return list;
     }

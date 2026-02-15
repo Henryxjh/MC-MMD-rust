@@ -7,6 +7,7 @@ import com.shiroha.mmdskin.fabric.maid.MaidCompatMixinPlugin;
 import com.shiroha.mmdskin.fabric.network.MmdSkinNetworkPack;
 import com.shiroha.mmdskin.maid.MaidActionNetworkHandler;
 import com.shiroha.mmdskin.maid.MaidModelNetworkHandler;
+import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRenderFactory;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRendererPlayerHelper;
 import com.shiroha.mmdskin.ui.network.ActionWheelNetworkHandler;
@@ -15,6 +16,7 @@ import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import com.shiroha.mmdskin.ui.network.StageNetworkHandler;
 import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
 import com.shiroha.mmdskin.renderer.camera.StageAudioPlayer;
+import com.shiroha.mmdskin.ui.QuickModelSwitcher;
 import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
 import com.shiroha.mmdskin.util.KeyMappingUtil;
@@ -56,6 +58,15 @@ public class MmdSkinRegisterClient {
     static KeyMapping keyMaidConfigWheel = new KeyMapping("key.mmdskin.maid_config_wheel",
         InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, "key.categories.mmdskin");
     
+    // 快捷模型切换按键 1-4（默认不绑定）
+    static final KeyMapping[] keyQuickModels = new KeyMapping[4];
+    static {
+        for (int i = 0; i < 4; i++) {
+            keyQuickModels[i] = new KeyMapping("key.mmdskin.quick_model_" + (i + 1),
+                InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), "key.categories.mmdskin");
+        }
+    }
+    
     // 追踪按键状态
     private static boolean configWheelKeyWasDown = false;
     private static boolean maidConfigWheelKeyWasDown = false;
@@ -75,6 +86,9 @@ public class MmdSkinRegisterClient {
         KeyBindingHelper.registerKeyBinding(keyConfigWheel);
         if (MaidCompatMixinPlugin.isMaidModLoaded()) {
             KeyBindingHelper.registerKeyBinding(keyMaidConfigWheel);
+        }
+        for (KeyMapping keyQuickModel : keyQuickModels) {
+            KeyBindingHelper.registerKeyBinding(keyQuickModel);
         }
         
         // 设置模组设置界面工厂
@@ -150,6 +164,9 @@ public class MmdSkinRegisterClient {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (MCinstance.player == null) return;
 
+            // 模型/纹理缓存 GC
+            MMDModelManager.tick();
+
             // 远程舞台音频距离衰减（每秒更新一次）
             StageAudioPlayer.tickRemoteAttenuation();
             
@@ -173,6 +190,15 @@ public class MmdSkinRegisterClient {
                 configWheelKeyWasDown = keyDown;
             } else {
                 configWheelKeyWasDown = false;
+            }
+            
+            // 快捷模型切换按键处理
+            if (MCinstance.screen == null) {
+                for (int i = 0; i < keyQuickModels.length; i++) {
+                    while (keyQuickModels[i].consumeClick()) {
+                        QuickModelSwitcher.switchToSlot(i);
+                    }
+                }
             }
             
             // 女仆配置轮盘按键处理
@@ -238,6 +264,11 @@ public class MmdSkinRegisterClient {
             PlayerModelSyncManager.onDisconnect();
             MmdSkinRendererPlayerHelper.onDisconnect();
         });
+        
+        // 注册性能调试 HUD 渲染
+        net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
+            (graphics, tickDelta) -> com.shiroha.mmdskin.renderer.core.PerformanceHud.render(graphics)
+        );
         
         logger.info("MMD Skin 客户端注册完成");
     }

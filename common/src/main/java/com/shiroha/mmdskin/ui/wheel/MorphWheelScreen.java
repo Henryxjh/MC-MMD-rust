@@ -85,7 +85,7 @@ public class MorphWheelScreen extends AbstractWheelScreen {
         }
         
         // 添加"重置表情"选项
-        morphSlots.add(new MorphSlot("重置表情", "__reset__", null));
+        morphSlots.add(new MorphSlot(Component.translatable("gui.mmdskin.reset_morph").getString(), "__reset__", null));
         
         logger.info("表情轮盘: 加载 {} 个槽位", morphSlots.size());
     }
@@ -122,13 +122,13 @@ public class MorphWheelScreen extends AbstractWheelScreen {
             renderOuterRing(guiGraphics);
             renderMorphLabels(guiGraphics);
         } else {
-            String hint = "暂无可用表情";
+            String hint = Component.translatable("gui.mmdskin.morph_wheel.no_morphs").getString();
             int hintWidth = font.width(hint);
             guiGraphics.drawString(font, hint, centerX - hintWidth / 2, centerY - 4, TEXT_COLOR);
         }
         
         // 中心圆 + 标题 + 选中名称
-        String centerText = "表情选择";
+        String centerText = Component.translatable("gui.mmdskin.morph_wheel.select").getString();
         if (selectedSlot >= 0 && selectedSlot < morphSlots.size()) {
             centerText = morphSlots.get(selectedSlot).displayName;
         }
@@ -199,7 +199,7 @@ public class MorphWheelScreen extends AbstractWheelScreen {
         String selectedModel = ModelSelectorConfig.getInstance().getPlayerModel(playerName);
         
         // 如果是默认渲染，不处理
-        if (selectedModel.equals(UIConstants.DEFAULT_MODEL_NAME) || selectedModel.isEmpty()) {
+        if (selectedModel == null || selectedModel.isEmpty() || UIConstants.DEFAULT_MODEL_NAME.equals(selectedModel)) {
             logger.warn("当前使用默认渲染，无法应用表情");
             return;
         }

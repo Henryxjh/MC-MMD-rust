@@ -607,6 +607,25 @@ impl BoneSet {
             self.skinning_matrices[i] = self.links[i].get_skinning_matrix();
         }
     }
+    
+    /// 计算 BoneSet 的堆内存占用（字节）
+    pub fn memory_usage(&self) -> u64 {
+        use std::mem::size_of;
+        let mut total: u64 = 0;
+        total += (self.links.capacity() * size_of::<BoneLink>()) as u64;
+        // name_to_index HashMap 估算
+        total += (self.name_to_index.capacity() * (size_of::<String>() + size_of::<usize>())) as u64;
+        total += (self.sorted_indices.capacity() * size_of::<usize>()) as u64;
+        total += (self.ik_solvers.capacity() * size_of::<IkSolver>()) as u64;
+        total += (self.skinning_matrices.capacity() * size_of::<Mat4>()) as u64;
+        total += (self.physics_bone_indices.capacity() * size_of::<usize>()) as u64;
+        // children_cache: Vec<Vec<usize>>
+        for children in &self.children_cache {
+            total += (children.capacity() * size_of::<usize>()) as u64;
+        }
+        total += (self.children_cache.capacity() * size_of::<Vec<usize>>()) as u64;
+        total
+    }
 }
 
 impl Default for BoneSet {

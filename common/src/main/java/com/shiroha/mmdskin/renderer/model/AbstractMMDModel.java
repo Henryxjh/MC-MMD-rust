@@ -21,6 +21,7 @@ import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
+import java.util.List;
 
 /**
  * MMD 模型抽象基类（SRP + LoD）
@@ -54,6 +55,9 @@ public abstract class AbstractMMDModel implements IMMDModel {
     protected ByteBuffer materialMorphResultsByteBuffer;
     protected int materialMorphResultCount = 0;
 
+    // 纹理引用键（dispose 时用于批量释放引用计数）
+    protected List<String> textureKeys;
+
     // ===== NativeFunc 访问 =====
 
     protected static NativeFunc getNf() {
@@ -86,6 +90,11 @@ public abstract class AbstractMMDModel implements IMMDModel {
     @Override
     public void transitionAnim(long anim, long layer, float transitionTime) {
         if (model != 0) getNf().TransitionLayerTo(model, layer, anim, transitionTime);
+    }
+
+    @Override
+    public void setLayerLoop(long layer, boolean loop) {
+        if (model != 0) getNf().SetLayerLoop(model, layer, loop);
     }
 
     @Override
@@ -212,6 +221,14 @@ public abstract class AbstractMMDModel implements IMMDModel {
         }
     }
 
+    /** 释放该模型引用的所有纹理（减少引用计数） */
+    protected void releaseTextures() {
+        if (textureKeys != null) {
+            com.shiroha.mmdskin.renderer.resource.MMDTextureManager.releaseAll(textureKeys);
+            textureKeys = null;
+        }
+    }
+
     /** 释放材质 Morph 缓冲区 */
     protected void disposeMaterialMorphBuffers() {
         if (materialMorphResultsBuffer != null) {
@@ -281,7 +298,7 @@ public abstract class AbstractMMDModel implements IMMDModel {
 
     /**
      * 子类可重写此方法，表示模型是否已完全初始化并可安全渲染。
-     * 默认返回 true（OpenGL/NativeRender 无额外初始化阶段）。
+     * 默认返回 true（OpenGL 无额外初始化阶段）。
      */
     protected boolean isReady() {
         return true;

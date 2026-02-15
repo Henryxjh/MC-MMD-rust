@@ -8,12 +8,12 @@ import com.shiroha.mmdskin.config.ModelConfigManager;
 import com.shiroha.mmdskin.renderer.core.FirstPersonManager;
 import com.shiroha.mmdskin.renderer.render.ItemRenderHelper;
 import com.shiroha.mmdskin.renderer.render.InventoryRenderHelper;
+import com.shiroha.mmdskin.renderer.render.PlayerRenderHelper;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.core.RenderContext;
 import com.shiroha.mmdskin.renderer.core.RenderParams;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
-import com.shiroha.mmdskin.renderer.model.MMDModelManager.Model;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
@@ -24,8 +24,6 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.player.PlayerRenderer;
-import net.minecraft.util.Mth;
-import org.joml.Vector3f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -79,7 +77,6 @@ public abstract class ForgePlayerRendererMixin extends LivingEntityRenderer<Abst
         
         // 如果选择了默认渲染或未选择模型，或 YSM 激活，或旁观者，使用原版渲染
         if (selectedModel == null || selectedModel.isEmpty() || selectedModel.equals("默认 (原版渲染)") || YsmCompat.isYsmActive(player) || player.isSpectator()) {
-            super.render(player, entityYaw, tickDelta, matrixStack, vertexConsumers, packedLight);
             return;
         }
         
@@ -100,10 +97,10 @@ public abstract class ForgePlayerRendererMixin extends LivingEntityRenderer<Abst
         IMMDModel model = modelData.model;
         
         // 加载模型属性
-        modelData.loadModelProperties(MmdSkinClient.reloadProperties);
+        modelData.loadModelProperties(false);
         
         // 获取模型尺寸
-        float[] size = getModelSize(modelData);
+        float[] size = PlayerRenderHelper.getModelSize(modelData);
         
         // 第一人称模式管理（阶段一：管理头部隐藏状态，在 render 之前）
         float combinedScale = size[0] * ModelConfigManager.getConfig(selectedModel).modelScale;
@@ -114,7 +111,7 @@ public abstract class ForgePlayerRendererMixin extends LivingEntityRenderer<Abst
         AnimationStateManager.updateAnimationState(player, modelData);
         
         // 计算渲染参数
-        RenderParams params = calculateRenderParams(player, modelData, tickDelta);
+        RenderParams params = PlayerRenderHelper.calculateRenderParams(player, modelData, tickDelta);
         
         // pushPose 隔离缩放，防止泄漏到 EntityRenderDispatcher 的 renderHitbox()
         matrixStack.pushPose();
@@ -145,62 +142,4 @@ public abstract class ForgePlayerRendererMixin extends LivingEntityRenderer<Abst
         ci.cancel();
     }
     
-    /**
-     * 计算渲染参数
-     */
-    private RenderParams calculateRenderParams(AbstractClientPlayer player, Model modelData, float tickDelta) {
-        RenderParams params = new RenderParams();
-        params.bodyYaw = Mth.rotLerp(tickDelta, player.yBodyRotO, player.yBodyRot);
-        params.bodyPitch = 0.0f;
-        params.translation = new Vector3f(0.0f);
-        
-        // 根据状态调整参数
-        if (player.isFallFlying()) {
-            params.bodyPitch = player.getXRot() + getPropertyFloat(modelData, "flyingPitch", 0.0f);
-            params.translation = getPropertyVector(modelData, "flyingTrans");
-        } else if (player.isSleeping()) {
-            params.bodyYaw = player.getBedOrientation().toYRot() + 180.0f;
-            params.bodyPitch = getPropertyFloat(modelData, "sleepingPitch", 0.0f);
-            params.translation = getPropertyVector(modelData, "sleepingTrans");
-        } else if (player.isSwimming()) {
-            params.bodyPitch = player.getXRot() + getPropertyFloat(modelData, "swimmingPitch", 0.0f);
-            params.translation = getPropertyVector(modelData, "swimmingTrans");
-        } else if (player.isVisuallyCrawling()) {
-            params.bodyPitch = getPropertyFloat(modelData, "crawlingPitch", 0.0f);
-            params.translation = getPropertyVector(modelData, "crawlingTrans");
-        }
-        
-        return params;
-    }
-    
-    /**
-     * 获取模型尺寸
-     */
-    private float[] getModelSize(Model modelData) {
-        float[] size = new float[2];
-        size[0] = getPropertyFloat(modelData, "size", 1.0f);
-        size[1] = getPropertyFloat(modelData, "size_in_inventory", 1.0f);
-        return size;
-    }
-    
-    /**
-     * 获取属性浮点值
-     */
-    private float getPropertyFloat(Model modelData, String key, float defaultValue) {
-        String value = modelData.properties.getProperty(key);
-        if (value == null) return defaultValue;
-        try {
-            return Float.parseFloat(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-    
-    /**
-     * 获取属性向量值
-     */
-    private Vector3f getPropertyVector(Model modelData, String key) {
-        String value = modelData.properties.getProperty(key);
-        return value == null ? new Vector3f(0.0f) : MmdSkinClient.str2Vec3f(value);
-    }
 }
