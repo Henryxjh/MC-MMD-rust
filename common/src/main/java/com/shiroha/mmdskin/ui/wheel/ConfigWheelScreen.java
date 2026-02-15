@@ -179,7 +179,7 @@ public class ConfigWheelScreen extends AbstractWheelScreen {
             Minecraft.getInstance().setScreen(screen);
         } else {
             Minecraft.getInstance().gui.getChat().addMessage(
-                Component.literal("§c未找到玩家模型，请先选择一个MMD模型"));
+                Component.translatable("message.mmdskin.player.model_not_found"));
         }
     }
     
@@ -192,10 +192,12 @@ public class ConfigWheelScreen extends AbstractWheelScreen {
             Screen settingsScreen = modSettingsScreenFactory.get();
             if (settingsScreen != null) {
                 Minecraft.getInstance().setScreen(settingsScreen);
+                return;
             }
-        } else {
+        }
+        {
             Minecraft.getInstance().gui.getChat().addMessage(
-                Component.literal("§c模组设置界面未初始化"));
+                Component.translatable("message.mmdskin.mod_settings.not_initialized"));
         }
     }
 

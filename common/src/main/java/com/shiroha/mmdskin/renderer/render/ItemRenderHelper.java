@@ -100,16 +100,27 @@ public class ItemRenderHelper {
         String handState = getHandState(player, hand);
         
         String specificKey = itemId + "_" + handStr + "_" + handState + "_" + axis;
-        if (model.properties.getProperty(specificKey) != null) {
-            return Float.parseFloat(model.properties.getProperty(specificKey));
+        String specificValue = model.properties.getProperty(specificKey);
+        if (specificValue != null) {
+            return parseFloatSafe(specificValue, 0.0f);
         }
         
         String defaultKey = "default_" + axis;
-        if (model.properties.getProperty(defaultKey) != null) {
-            return Float.parseFloat(model.properties.getProperty(defaultKey));
+        String defaultValue = model.properties.getProperty(defaultKey);
+        if (defaultValue != null) {
+            return parseFloatSafe(defaultValue, 0.0f);
         }
         
         return 0.0f;
+    }
+    
+    /** 安全解析浮点值，格式错误时返回默认值 */
+    private static float parseFloatSafe(String value, float defaultValue) {
+        try {
+            return Float.parseFloat(value);
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
     
     private static String getHandState(AbstractClientPlayer player, InteractionHand hand) {

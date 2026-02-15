@@ -37,7 +37,8 @@ public abstract class LevelRendererMixin {
 
                 boolean isMmdDefault = selectedModel == null || selectedModel.isEmpty() || selectedModel.equals("默认 (原版渲染)");
                 boolean isMmdActive = !isMmdDefault;
-                boolean isVanilaMmdModel = isMmdActive && (selectedModel.equals("VanilaModel") || selectedModel.equalsIgnoreCase("vanila"));
+                boolean isVanilaMmdModel = isMmdActive && (selectedModel.equals("VanillaModel") || selectedModel.equalsIgnoreCase("vanilla")
+                        || selectedModel.equals("VanilaModel") || selectedModel.equalsIgnoreCase("vanila"));
 
                 // YSM 兼容
                 if (YsmCompat.isYsmModelActive(player)) {

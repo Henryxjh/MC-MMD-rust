@@ -198,4 +198,14 @@ public final class MmdSkinConfig implements ConfigManager.IConfigProvider {
     public float getFirstPersonCameraVerticalOffset() {
         return data.firstPersonCameraVerticalOffset;
     }
+    
+    @Override
+    public boolean isDebugHudEnabled() {
+        return data.debugHudEnabled;
+    }
+    
+    @Override
+    public int getTextureCacheBudgetMB() {
+        return data.textureCacheBudgetMB;
+    }
 }

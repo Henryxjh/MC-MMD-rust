@@ -4,34 +4,36 @@ use crate::animation::{VmdAnimation, AnimationLayerManager};
 use crate::morph::MorphManager;
 use crate::physics::MMDPhysics;
 use crate::skeleton::BoneManager;
-use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{MmdMaterial, RuntimeVertex, SubMesh, VertexWeight};
 
-/// 全局 PRNG 状态（xorshift32）
-static PRNG_STATE: AtomicU32 = AtomicU32::new(0);
+thread_local! {
+    /// 线程局部 PRNG 状态（xorshift32），避免多线程竞态
+    static PRNG_STATE: std::cell::Cell<u32> = std::cell::Cell::new(0);
+}
 
-/// 简单的伪随机数生成（0.0 - 1.0），使用 xorshift32
+/// 线程安全的伪随机数生成（0.0 - 1.0），使用 xorshift32
 fn rand_float() -> f32 {
-    let mut s = PRNG_STATE.load(Ordering::Relaxed);
-    if s == 0 {
-        // 用纳秒时间戳初始化种子
-        s = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos()
-            | 1; // 确保不为 0
-    }
-    s ^= s << 13;
-    s ^= s >> 17;
-    s ^= s << 5;
-    PRNG_STATE.store(s, Ordering::Relaxed);
-    (s as f32) / (u32::MAX as f32)
+    PRNG_STATE.with(|cell| {
+        let mut s = cell.get();
+        if s == 0 {
+            s = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+                | 1;
+        }
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        cell.set(s);
+        (s as f32) / (u32::MAX as f32)
+    })
 }
 
 /// MMD 运行时模型
@@ -67,6 +69,8 @@ pub struct MmdModel {
     head_angle_x: f32,
     head_angle_y: f32,
     head_angle_z: f32,
+    head_bone_cached: Option<usize>, // 缓存头部骨骼索引（避免每帧查找）
+    head_bone_searched: bool,        // 是否已搜索过头部骨骼
     
     // 眼球追踪（看向摄像头）
     eye_angle_x: f32,
@@ -191,6 +195,8 @@ impl MmdModel {
             head_angle_x: 0.0,
             head_angle_y: 0.0,
             head_angle_z: 0.0,
+            head_bone_cached: None,
+            head_bone_searched: false,
             eye_angle_x: 0.0,
             eye_angle_y: 0.0,
             eye_tracking_enabled: false,
@@ -751,6 +757,11 @@ impl MmdModel {
         self.animation_layer_manager.set_layer_speed(layer_id, speed);
     }
 
+    /// 设置层是否循环播放
+    pub fn set_layer_loop(&mut self, layer_id: usize, loop_play: bool) {
+        self.animation_layer_manager.set_layer_loop(layer_id, loop_play);
+    }
+
     /// 跳转到指定帧
     pub fn seek_layer(&mut self, layer_id: usize, frame: f32) {
         self.animation_layer_manager.seek_layer(layer_id, frame);
@@ -852,6 +863,13 @@ impl MmdModel {
             return;
         }
         
+        // 除零保护：duration <= 0 时直接结束过渡
+        if self.transition_duration <= 0.0 {
+            self.is_transitioning = false;
+            self.transition_matrices.clear();
+            return;
+        }
+        
         // 更新过渡进度
         self.transition_progress += elapsed / self.transition_duration;
         
@@ -903,20 +921,26 @@ impl MmdModel {
 
     /// 应用头部旋转到骨骼
     fn apply_head_rotation(&mut self) {
-        // 查找头部骨骼（常见名称）
-        let head_names = ["頭", "head", "Head", "あたま"];
-
-        for name in &head_names {
-            if let Some(bone_idx) = self.bone_manager.find_bone_by_name(name) {
-                let rotation = glam::Quat::from_euler(
-                    glam::EulerRot::XYZ,
-                    self.head_angle_x,
-                    self.head_angle_y,
-                    self.head_angle_z,
-                );
-                self.bone_manager.add_bone_rotation(bone_idx, rotation);
-                break;
+        // 延迟搜索 + 缓存头部骨骼索引（只搜索一次）
+        if !self.head_bone_searched {
+            self.head_bone_searched = true;
+            let head_names = ["頭", "head", "Head", "あたま"];
+            for name in &head_names {
+                if let Some(idx) = self.bone_manager.find_bone_by_name(name) {
+                    self.head_bone_cached = Some(idx);
+                    break;
+                }
             }
+        }
+
+        if let Some(bone_idx) = self.head_bone_cached {
+            let rotation = glam::Quat::from_euler(
+                glam::EulerRot::XYZ,
+                self.head_angle_x,
+                self.head_angle_y,
+                self.head_angle_z,
+            );
+            self.bone_manager.add_bone_rotation(bone_idx, rotation);
         }
         
         // 应用眼球追踪
@@ -1211,116 +1235,6 @@ impl MmdModel {
         }
         
         count
-    }
-    
-    // ========== NativeRender MC 顶点构建（P2-9 优化）==========
-    
-    /// 构建 MC NEW_ENTITY 格式的交错顶点数据（含矩阵变换）
-    ///
-    /// 将蒙皮后的 SoA 数据（分离的 pos/nor/uv 数组）按索引展开，
-    /// 应用 pose/normal 矩阵变换后，直接写入 MC 交错格式。
-    ///
-    /// 顶点布局（每顶点 36 字节）：
-    /// - Position: 3 × f32 (12 bytes, offset 0)
-    /// - Color:    4 × u8  (4 bytes,  offset 12)
-    /// - UV0:      2 × f32 (8 bytes,  offset 16)
-    /// - Overlay:  1 × u32 (4 bytes,  offset 24) — 打包的 2×i16
-    /// - UV2:      1 × u32 (4 bytes,  offset 28) — 打包的 2×i16
-    /// - Normal:   3 × i8 + 1 pad (4 bytes, offset 32)
-    pub fn build_mc_vertex_buffer(
-        &self,
-        sub_mesh_index: usize,
-        output: &mut [u8],
-        pose_matrix: &Mat4,
-        normal_matrix: &Mat3,
-        color_rgba: u32,
-        overlay_uv: u32,
-        packed_light: u32,
-    ) -> usize {
-        if sub_mesh_index >= self.submeshes.len() {
-            return 0;
-        }
-        
-        let submesh = &self.submeshes[sub_mesh_index];
-        let begin = submesh.begin_index as usize;
-        let count = submesh.index_count as usize;
-        let vertex_count = self.update_positions_raw.len() / 3;
-        
-        const STRIDE: usize = 36;
-        if output.len() < count * STRIDE {
-            log::warn!(
-                "BuildMCVertexBuffer: 输出缓冲区不足 (需要 {} 字节, 实际 {} 字节)",
-                count * STRIDE, output.len()
-            );
-            return 0;
-        }
-        
-        let positions = &self.update_positions_raw;
-        let normals = &self.update_normals_raw;
-        let uvs = &self.update_uvs_raw;
-        let indices = &self.indices;
-        
-        let mut written: usize = 0;
-        for i in 0..count {
-            let global_idx = begin + i;
-            if global_idx >= indices.len() {
-                break;
-            }
-            let idx = indices[global_idx] as usize;
-            if idx >= vertex_count {
-                // 索引越界：写入零顶点（避免输出缓冲区空洞）
-                unsafe {
-                    let p = output.as_mut_ptr().add(written * STRIDE);
-                    std::ptr::write_bytes(p, 0, STRIDE);
-                }
-                written += 1;
-                continue;
-            }
-            
-            let out_offset = written * STRIDE;
-            
-            // 读取蒙皮后的位置并应用 pose 矩阵变换
-            let px = positions[idx * 3];
-            let py = positions[idx * 3 + 1];
-            let pz = positions[idx * 3 + 2];
-            let pos = pose_matrix.transform_point3(Vec3::new(px, py, pz));
-            
-            // 读取蒙皮后的法线并应用 normal 矩阵变换
-            let nx = normals[idx * 3];
-            let ny = normals[idx * 3 + 1];
-            let nz = normals[idx * 3 + 2];
-            let nor = (*normal_matrix * Vec3::new(nx, ny, nz)).normalize_or_zero();
-            
-            // 读取 UV
-            let u = uvs[idx * 2];
-            let v = uvs[idx * 2 + 1];
-            
-            // 写入交错顶点数据（使用 unsafe 指针写入，避免逐字节 copy_from_slice 开销）
-            unsafe {
-                let p = output.as_mut_ptr().add(out_offset);
-                // Position: 3 × f32 (offset 0)
-                (p as *mut f32).write_unaligned(pos.x);
-                (p.add(4) as *mut f32).write_unaligned(pos.y);
-                (p.add(8) as *mut f32).write_unaligned(pos.z);
-                // Color: 4 × u8 (offset 12)
-                (p.add(12) as *mut u32).write_unaligned(color_rgba);
-                // UV0: 2 × f32 (offset 16)
-                (p.add(16) as *mut f32).write_unaligned(u);
-                (p.add(20) as *mut f32).write_unaligned(v);
-                // Overlay: u32 (offset 24)
-                (p.add(24) as *mut u32).write_unaligned(overlay_uv);
-                // UV2/Lightmap: u32 (offset 28)
-                (p.add(28) as *mut u32).write_unaligned(packed_light);
-                // Normal: 3 × i8 + 1 pad (offset 32)
-                *p.add(32) = (nor.x.clamp(-1.0, 1.0) * 127.0) as i8 as u8;
-                *p.add(33) = (nor.y.clamp(-1.0, 1.0) * 127.0) as i8 as u8;
-                *p.add(34) = (nor.z.clamp(-1.0, 1.0) * 127.0) as i8 as u8;
-                *p.add(35) = 0; // padding
-            }
-            written += 1;
-        }
-        
-        written
     }
     
     // ========== GPU 蒙皮相关方法 ==========
@@ -1794,10 +1708,9 @@ impl MmdModel {
 
         // 收集骨骼变换（复用缓冲区）
         let bone_count = self.bone_manager.bone_count();
-        self.physics_bone_transforms_buf.clear();
-        self.physics_bone_transforms_buf.reserve(bone_count);
+        self.physics_bone_transforms_buf.resize(bone_count, Mat4::IDENTITY);
         for i in 0..bone_count {
-            self.physics_bone_transforms_buf.push(self.bone_manager.get_global_transform(i));
+            self.physics_bone_transforms_buf[i] = self.bone_manager.get_global_transform(i);
         }
 
         physics.build_physics(&self.rigid_bodies, &self.joints, &self.physics_bone_transforms_buf);
@@ -1843,11 +1756,11 @@ impl MmdModel {
             return;
         }
 
-        // 收集骨骼变换（复用缓冲区）
+        // 收集骨骼变换（复用缓冲区，resize + 索引赋值避免 push 分支开销）
         let bone_count = self.bone_manager.bone_count();
-        self.physics_bone_transforms_buf.clear();
+        self.physics_bone_transforms_buf.resize(bone_count, Mat4::IDENTITY);
         for i in 0..bone_count {
-            self.physics_bone_transforms_buf.push(self.bone_manager.get_global_transform(i));
+            self.physics_bone_transforms_buf[i] = self.bone_manager.get_global_transform(i);
         }
 
         let model_transform = self.model_transform;
@@ -1932,6 +1845,74 @@ impl MmdModel {
         } else {
             String::from("{\"error\": \"no physics\"}")
         }
+    }
+    
+    /// 计算模型在 Rust 堆上的内存占用（字节）
+    /// 遍历所有 Vec 的 capacity × 元素大小，精度约 95%+
+    pub fn memory_usage(&self) -> u64 {
+        use std::mem::size_of;
+        let mut total: u64 = 0;
+        
+        // 静态数据
+        total += (self.vertices.capacity() * size_of::<RuntimeVertex>()) as u64;
+        total += (self.indices.capacity() * size_of::<u32>()) as u64;
+        total += (self.weights.capacity() * size_of::<VertexWeight>()) as u64;
+        total += (self.materials.capacity() * size_of::<MmdMaterial>()) as u64;
+        total += (self.submeshes.capacity() * size_of::<SubMesh>()) as u64;
+        // texture_paths: 每个 String 有堆分配
+        for s in &self.texture_paths {
+            total += s.capacity() as u64;
+        }
+        total += (self.texture_paths.capacity() * size_of::<String>()) as u64;
+        
+        // PMX 原始数据（刚体/关节）
+        total += (self.rigid_bodies.capacity() * size_of::<mmd::pmx::rigid_body::RigidBody>()) as u64;
+        total += (self.joints.capacity() * size_of::<mmd::pmx::joint::Joint>()) as u64;
+        
+        // 运行时更新缓冲区
+        total += (self.update_positions.capacity() * size_of::<Vec3>()) as u64;
+        total += (self.update_normals.capacity() * size_of::<Vec3>()) as u64;
+        total += (self.update_uvs.capacity() * size_of::<Vec2>()) as u64;
+        total += (self.update_positions_raw.capacity() * size_of::<f32>()) as u64;
+        total += (self.update_normals_raw.capacity() * size_of::<f32>()) as u64;
+        total += (self.update_uvs_raw.capacity() * size_of::<f32>()) as u64;
+        
+        // GPU 蒙皮缓冲区
+        total += (self.bone_indices.capacity() * size_of::<i32>()) as u64;
+        total += (self.bone_weights.capacity() * size_of::<f32>()) as u64;
+        total += (self.original_positions.capacity() * size_of::<f32>()) as u64;
+        total += (self.original_normals.capacity() * size_of::<f32>()) as u64;
+        
+        // GPU Morph 缓冲区（可能非常大）
+        total += (self.gpu_morph_offsets.capacity() * size_of::<f32>()) as u64;
+        total += (self.gpu_morph_weights.capacity() * size_of::<f32>()) as u64;
+        total += (self.vertex_morph_indices.capacity() * size_of::<usize>()) as u64;
+        
+        // GPU UV Morph 缓冲区
+        total += (self.gpu_uv_morph_offsets.capacity() * size_of::<f32>()) as u64;
+        total += (self.gpu_uv_morph_weights.capacity() * size_of::<f32>()) as u64;
+        total += (self.uv_morph_indices.capacity() * size_of::<usize>()) as u64;
+        
+        // 材质 Morph 结果缓存
+        total += (self.material_morph_results_flat_cache.capacity() * size_of::<f32>()) as u64;
+        
+        // 物理缓冲区
+        total += (self.physics_bone_transforms_buf.capacity() * size_of::<Mat4>()) as u64;
+        total += (self.transition_matrices.capacity() * size_of::<Mat4>()) as u64;
+        
+        // 材质可见性
+        total += (self.material_visible.capacity() * size_of::<bool>()) as u64;
+        total += (self.material_visible_backup.capacity() * size_of::<bool>()) as u64;
+        total += (self.head_submesh_flags.capacity() * size_of::<bool>()) as u64;
+        
+        // 子系统估算
+        total += self.bone_manager.memory_usage();
+        total += self.morph_manager.memory_usage();
+        
+        // VPD 骨骼覆盖
+        total += (self.vpd_bone_overrides.capacity() * (size_of::<usize>() + size_of::<(Vec3, Quat)>())) as u64;
+        
+        total
     }
 }
 

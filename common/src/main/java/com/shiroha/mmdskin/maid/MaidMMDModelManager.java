@@ -7,6 +7,7 @@ import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -103,22 +104,22 @@ public class MaidMMDModelManager {
             return null;
         }
         
-        // 检查是否已加载
+        // 检查是否已加载且句柄仍有效
         MMDModelManager.Model model = loadedModels.get(maidUUID);
         if (model != null) {
-            return model;
+            if (model.model != null && model.model.getModelHandle() != 0) {
+                return model;
+            }
+            // 句柄已失效（被 ModelCache GC 回收），移除悬空引用
+            loadedModels.remove(maidUUID);
+            logger.warn("女仆 {} 模型句柄已失效，将重新加载", maidUUID);
         }
         
-        // 懒加载模型
+        // 懒加载模型（createModelWrapper 已设置 idle 动画，无需重复设置）
         String cacheKey = "maid_" + maidUUID.toString();
         model = MMDModelManager.GetModel(modelName, cacheKey);
         if (model != null) {
             loadedModels.put(maidUUID, model);
-            
-            // 设置默认动画
-            IMMDModel mmdModel = model.model;
-            mmdModel.changeAnim(MMDAnimManager.GetAnimModel(mmdModel, "idle"), 0);
-            
             logger.info("女仆 {} 模型加载成功: {}", maidUUID, modelName);
         }
         
@@ -149,6 +150,15 @@ public class MaidMMDModelManager {
     }
     
     /**
+     * 模型被 dispose 时的回调，移除 loadedModels 中所有持有该模型的条目
+     * 防止悬空引用（访问已释放的 GL 资源）
+     */
+    public static void onModelDisposed(MMDModelManager.Model disposedModel) {
+        if (disposedModel == null) return;
+        loadedModels.entrySet().removeIf(entry -> entry.getValue() == disposedModel);
+    }
+    
+    /**
      * 使已加载的模型缓存失效（保留绑定关系）
      * 
      * 当全局模型缓存被清空时调用，避免持有已释放 GL 资源的旧模型引用。
@@ -175,5 +185,12 @@ public class MaidMMDModelManager {
      */
     public static int getBindingCount() {
         return maidModelBindings.size();
+    }
+    
+    /**
+     * 获取所有已加载的女仆模型快照（供 PerformanceHud 使用）
+     */
+    public static Collection<MMDModelManager.Model> getLoadedMaidModels() {
+        return loadedModels.values();
     }
 }

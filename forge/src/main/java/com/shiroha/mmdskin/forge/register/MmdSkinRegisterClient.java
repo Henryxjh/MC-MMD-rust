@@ -5,6 +5,7 @@ import com.shiroha.mmdskin.forge.config.ModConfigScreen;
 import com.shiroha.mmdskin.forge.network.MmdSkinNetworkPack;
 import com.shiroha.mmdskin.maid.MaidActionNetworkHandler;
 import com.shiroha.mmdskin.maid.MaidModelNetworkHandler;
+import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRenderFactory;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRendererPlayerHelper;
 import com.shiroha.mmdskin.ui.network.ActionWheelNetworkHandler;
@@ -13,6 +14,7 @@ import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import com.shiroha.mmdskin.ui.network.StageNetworkHandler;
 import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
 import com.shiroha.mmdskin.renderer.camera.StageAudioPlayer;
+import com.shiroha.mmdskin.ui.QuickModelSwitcher;
 import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
 import com.shiroha.mmdskin.util.KeyMappingUtil;
@@ -71,6 +73,20 @@ public class MmdSkinRegisterClient {
         GLFW.GLFW_KEY_B, 
         "key.categories.mmdskin"
     );
+    
+    // 快捷模型切换按键 1-4（默认不绑定）
+    public static final KeyMapping[] keyQuickModels = new KeyMapping[4];
+    static {
+        for (int i = 0; i < 4; i++) {
+            keyQuickModels[i] = new KeyMapping(
+                "key.mmdskin.quick_model_" + (i + 1),
+                KeyConflictContext.IN_GAME,
+                InputConstants.Type.KEYSYM,
+                InputConstants.UNKNOWN.getValue(),
+                "key.categories.mmdskin"
+            );
+        }
+    }
     
     // 追踪按键状态
     private static boolean configWheelKeyWasDown = false;
@@ -189,6 +205,9 @@ public class MmdSkinRegisterClient {
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(keyConfigWheel);
         event.register(keyMaidConfigWheel);
+        for (KeyMapping keyQuickModel : keyQuickModels) {
+            event.register(keyQuickModel);
+        }
         logger.info("按键映射注册完成");
     }
     
@@ -238,6 +257,9 @@ public class MmdSkinRegisterClient {
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null) return;
 
+            // 模型/纹理缓存 GC
+            MMDModelManager.tick();
+
             // 远程舞台音频距离衰减（每秒更新一次）
             StageAudioPlayer.tickRemoteAttenuation();
             
@@ -250,6 +272,15 @@ public class MmdSkinRegisterClient {
                 configWheelKeyWasDown = keyDown;
             } else {
                 configWheelKeyWasDown = false;
+            }
+            
+            // 快捷模型切换按键处理
+            if (mc.screen == null) {
+                for (int i = 0; i < keyQuickModels.length; i++) {
+                    while (keyQuickModels[i].consumeClick()) {
+                        QuickModelSwitcher.switchToSlot(i);
+                    }
+                }
             }
             
             // 女仆配置轮盘按键处理
@@ -329,6 +360,14 @@ public class MmdSkinRegisterClient {
             }
         }
 
+        /**
+         * HUD 渲染事件 - 性能调试 HUD
+         */
+        @SubscribeEvent
+        public static void onRenderGui(net.minecraftforge.client.event.RenderGuiEvent.Post event) {
+            com.shiroha.mmdskin.renderer.core.PerformanceHud.render(event.getGuiGraphics());
+        }
+        
         /**
          * 玩家复活事件 - 确保退出舞台模式
          */

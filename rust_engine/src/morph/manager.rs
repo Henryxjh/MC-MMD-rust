@@ -258,6 +258,18 @@ impl MorphManager {
             );
         }
     }
+    
+    /// 计算 MorphManager 的堆内存占用（字节）
+    pub fn memory_usage(&self) -> u64 {
+        use std::mem::size_of;
+        let mut total: u64 = 0;
+        total += (self.morphs.capacity() * size_of::<Morph>()) as u64;
+        // name_to_index HashMap 估算
+        total += (self.name_to_index.capacity() * (size_of::<String>() + size_of::<usize>())) as u64;
+        total += (self.material_morph_results.capacity() * size_of::<MaterialMorphResult>()) as u64;
+        total += (self.uv_morph_deltas.capacity() * size_of::<Vec2>()) as u64;
+        total
+    }
 }
 
 /// 应用单个 Morph（支持递归，depth 用于防止无限循环）
