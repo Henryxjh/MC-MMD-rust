@@ -85,8 +85,10 @@ public class MMDAnimManager {
         if (nf == null || animModel == null) return;
         Map<String, Long> sub = animModel.get(model);
         if (sub != null) {
-            for (Long i : sub.values()) {
-                nf.DeleteAnimation(i);
+            for (Long handle : sub.values()) {
+                if (handle != null) {
+                    nf.DeleteAnimation(handle);
+                }
             }
         }
         animModel.remove(model);

@@ -402,7 +402,7 @@ public class MMDModelManager {
      * 创建模型包装器
      */
     private static Model createModelWrapper(String name, IMMDModel model, String modelName) {
-        ModelWithEntityData m = new ModelWithEntityData();
+        Model m = new Model();
         m.entityName = name;
         m.model = model;
         m.modelName = modelName;
@@ -564,8 +564,4 @@ public class MMDModelManager {
         } 
     }
 
-    /** @deprecated 已合并到 Model，保留为类型别名以兼容 fabric/forge Mixin 引用 */
-    @Deprecated
-    public static class ModelWithEntityData extends Model {
-    }
 }

@@ -20,7 +20,6 @@ import org.joml.Vector3f;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
-import java.nio.FloatBuffer;
 import java.util.List;
 
 /**
@@ -51,7 +50,6 @@ public abstract class AbstractMMDModel implements IMMDModel {
     protected final Quaternionf tempQuat = new Quaternionf();
 
     // 材质 Morph
-    protected FloatBuffer materialMorphResultsBuffer;
     protected ByteBuffer materialMorphResultsByteBuffer;
     protected int materialMorphResultCount = 0;
 
@@ -182,13 +180,10 @@ public abstract class AbstractMMDModel implements IMMDModel {
      * 获取材质 Morph 结果
      */
     protected void fetchMaterialMorphResults() {
-        if (materialMorphResultCount <= 0 || materialMorphResultsBuffer == null) return;
+        if (materialMorphResultCount <= 0 || materialMorphResultsByteBuffer == null) return;
         materialMorphResultsByteBuffer.clear();
         getNf().CopyMaterialMorphResultsToBuffer(model, materialMorphResultsByteBuffer);
-        materialMorphResultsBuffer.clear();
-        materialMorphResultsByteBuffer.position(0);
-        materialMorphResultsBuffer.put(materialMorphResultsByteBuffer.asFloatBuffer());
-        materialMorphResultsBuffer.flip();
+        materialMorphResultsByteBuffer.rewind();
     }
 
     /**
@@ -196,11 +191,12 @@ public abstract class AbstractMMDModel implements IMMDModel {
      * 布局：每材质 56 float = mul(28) + add(28)，diffuse.w 在各组偏移 3
      */
     protected float getEffectiveMaterialAlpha(int materialIndex, float baseAlpha) {
-        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return baseAlpha;
+        if (materialMorphResultsByteBuffer == null || materialIndex >= materialMorphResultCount) return baseAlpha;
         int mulOffset = materialIndex * 56 + 3;
         int addOffset = materialIndex * 56 + 28 + 3;
-        float mulAlpha = (mulOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(mulOffset) : 1.0f;
-        float addAlpha = (addOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(addOffset) : 0.0f;
+        int capacity = materialMorphResultsByteBuffer.capacity() / 4;
+        float mulAlpha = (mulOffset < capacity) ? materialMorphResultsByteBuffer.getFloat(mulOffset * 4) : 1.0f;
+        float addAlpha = (addOffset < capacity) ? materialMorphResultsByteBuffer.getFloat(addOffset * 4) : 0.0f;
         return baseAlpha * mulAlpha + addAlpha;
     }
 
@@ -231,10 +227,6 @@ public abstract class AbstractMMDModel implements IMMDModel {
 
     /** 释放材质 Morph 缓冲区 */
     protected void disposeMaterialMorphBuffers() {
-        if (materialMorphResultsBuffer != null) {
-            MemoryUtil.memFree(materialMorphResultsBuffer);
-            materialMorphResultsBuffer = null;
-        }
         if (materialMorphResultsByteBuffer != null) {
             MemoryUtil.memFree(materialMorphResultsByteBuffer);
             materialMorphResultsByteBuffer = null;

@@ -208,7 +208,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
         int[] uvMorphBuffers = null;
         FloatBuffer uvMorphWeightsBuf = null;
         int skinnedUvBuf = 0;
-        FloatBuffer matMorphResultsBuf = null;
         ByteBuffer matMorphResultsByteBuf = null;
         ByteBuffer subMeshDataBufLocal = null;
         MMDMaterial lightMapMaterial = null;
@@ -433,7 +432,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
             int matMorphCount = nf.GetMaterialMorphResultCount(model);
             if (matMorphCount > 0) {
                 int floatCount = matMorphCount * 56;
-                matMorphResultsBuf = MemoryUtil.memAllocFloat(floatCount);
                 matMorphResultsByteBuf = MemoryUtil.memAlloc(floatCount * 4);
                 matMorphResultsByteBuf.order(ByteOrder.LITTLE_ENDIAN);
             }
@@ -491,7 +489,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
             }
             // 材质 Morph
             result.materialMorphResultCount = matMorphCount;
-            result.materialMorphResultsBuffer = matMorphResultsBuf;
             result.materialMorphResultsByteBuffer = matMorphResultsByteBuf;
             result.subMeshCount = (int) nf.GetSubMeshCount(model);
             subMeshDataBufLocal = MemoryUtil.memAlloc(result.subMeshCount * 20);
@@ -548,7 +545,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
             if (projMatBuff != null) MemoryUtil.memFree(projMatBuff);
             if (morphWeightsBuffer != null) MemoryUtil.memFree(morphWeightsBuffer);
             if (uvMorphWeightsBuf != null) MemoryUtil.memFree(uvMorphWeightsBuf);
-            if (matMorphResultsBuf != null) MemoryUtil.memFree(matMorphResultsBuf);
             if (matMorphResultsByteBuf != null) MemoryUtil.memFree(matMorphResultsByteBuf);
             if (subMeshDataBufLocal != null) MemoryUtil.memFree(subMeshDataBufLocal);
             
