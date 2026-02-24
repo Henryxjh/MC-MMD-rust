@@ -3,6 +3,8 @@ package com.shiroha.mmdskin.fabric;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.LivingEntity;
 import net.fabricmc.loader.api.FabricLoader;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import java.lang.reflect.Method;
 
 /**
@@ -10,6 +12,7 @@ import java.lang.reflect.Method;
  * 通过反射访问 YSM 内部 API，用于检测玩家是否正在使用 YSM 模型
  */
 public class YsmCompat {
+    private static final Logger logger = LogManager.getLogger();
     private static boolean ysmChecked = false;
     private static boolean ysmPresent = false;
 
@@ -60,7 +63,7 @@ public class YsmCompat {
                         booleanValueGetMethod = disableSelfModelValue.getClass().getMethod("get");
                     }
                 } catch (Exception e) {
-                    System.err.println("[MMDSkin] Failed to initialize YSM Fabric compatibility: " + e.getMessage());
+                    logger.error("YSM Fabric 兼容初始化失败: {}", e.getMessage());
                     ysmPresent = false;
                 }
             }

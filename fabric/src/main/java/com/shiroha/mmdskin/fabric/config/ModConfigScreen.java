@@ -343,6 +343,16 @@ public class ModConfigScreen {
             .setSaveConsumer(value -> data.physicsJointsEnabled = value)
             .build());
         
+        // 碰撞过滤
+        physicsCategory.addEntry(entryBuilder
+            .startBooleanToggle(
+                Component.translatable("gui.mmdskin.mod_settings.physics_kinematic_filter"),
+                data.physicsKinematicFilter)
+            .setDefaultValue(true)
+            .setTooltip(Component.translatable("gui.mmdskin.mod_settings.physics_kinematic_filter.tooltip"))
+            .setSaveConsumer(value -> data.physicsKinematicFilter = value)
+            .build());
+        
         // 调试日志
         physicsCategory.addEntry(entryBuilder
             .startBooleanToggle(
@@ -406,6 +416,7 @@ public class ModConfigScreen {
                     data.physicsMaxLinearVelocity,
                     data.physicsMaxAngularVelocity,
                     data.physicsJointsEnabled,
+                    data.physicsKinematicFilter,
                     data.physicsDebugLog
                 );
             } catch (UnsatisfiedLinkError e) {

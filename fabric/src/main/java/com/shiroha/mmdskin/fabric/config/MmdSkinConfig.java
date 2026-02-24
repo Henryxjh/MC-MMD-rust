@@ -27,7 +27,6 @@ public final class MmdSkinConfig extends AbstractMmdSkinConfig {
     public static void init() {
         instance = new MmdSkinConfig();
         ConfigManager.init(instance);
-        logger.info("Fabric 配置系统初始化完成 (JSON)");
     }
 
     /** 获取配置数据（供 UI 使用） */
