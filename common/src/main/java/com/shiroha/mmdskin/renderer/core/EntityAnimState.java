@@ -6,13 +6,10 @@ import java.nio.ByteBuffer;
 
 /**
  * 实体动画状态
- * 负责管理单个实体的动画层状态和手部矩阵
+ * 管理单个实体的动画层状态和手部矩阵
  */
 public class EntityAnimState {
     
-    /**
-     * 实体状态枚举（OCP: 属性名内嵌，新增状态只需修改此处）
-     */
     public enum State {
         Idle("idle"), Walk("walk"), Sprint("sprint"), Air("air"),
         OnClimbable("onClimbable"), OnClimbableUp("onClimbableUp"), OnClimbableDown("onClimbableDown"),
@@ -35,11 +32,6 @@ public class EntityAnimState {
     public State[] stateLayers;
     public ByteBuffer matBuffer;
     
-    /**
-     * 创建新的实体动画状态
-     * 
-     * @param layerCount 动画层数量
-     */
     public EntityAnimState(int layerCount) {
         NativeFunc nf = NativeFunc.GetInst();
         this.stateLayers = new State[layerCount];
@@ -50,8 +42,14 @@ public class EntityAnimState {
     }
     
     /**
-     * 释放资源
+     * 将所有层标记为脏状态，确保下次状态更新一定触发动画切换
      */
+    public void invalidateStateLayers() {
+        for (int i = 0; i < stateLayers.length; i++) {
+            stateLayers[i] = null;
+        }
+    }
+    
     public void dispose() {
         NativeFunc nf = NativeFunc.GetInst();
         if (rightHandMat != 0) {
@@ -62,12 +60,8 @@ public class EntityAnimState {
             nf.DeleteMat(leftHandMat);
             leftHandMat = 0;
         }
-        // matBuffer 由 GC 回收（allocateDirect）
     }
     
-    /**
-     * 获取状态对应的属性名
-     */
     public static String getPropertyName(State state) {
         return state.propertyName;
     }

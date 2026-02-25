@@ -67,7 +67,5 @@ public final class QuickModelSwitcher {
         
         // 强制重载模型缓存
         MMDModelManager.forceReloadPlayerModels(playerName);
-        
-        logger.info("快捷切换模型: {}", modelName);
     }
 }

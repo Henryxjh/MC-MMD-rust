@@ -50,7 +50,6 @@ public class MMDTextureManager {
         nf = NativeFunc.GetInst();
         textures = new ConcurrentHashMap<>();
         pendingRelease.clear();
-        logger.info("MMDTextureManager 初始化完成（引用计数模式）");
     }
     
     /**
@@ -130,9 +129,8 @@ public class MMDTextureManager {
         // 2. 检查延迟释放队列（复用已加载但 refCount 归零的纹理）
         result = pendingRelease.remove(filename);
         if (result != null) {
-            result.refCount.set(0); // 重置，等调用者 addRef
+            result.refCount.set(0);
             textures.put(filename, result);
-            logger.debug("从延迟释放队列复用纹理: {}", filename);
             return result;
         }
         
@@ -147,7 +145,6 @@ public class MMDTextureManager {
         // 4. 全量同步加载
         long nfTex = nf.LoadTexture(filename);
         if (nfTex == 0) {
-            logger.info("纹理未找到: {}", filename);
             return null;
         }
         int x = nf.GetTextureX(nfTex);
@@ -252,7 +249,6 @@ public class MMDTextureManager {
                 tex.refCount.set(0);
                 tex.lastReleaseTime = System.currentTimeMillis();
                 pendingRelease.put(key, tex);
-                logger.debug("纹理引用归零，移入延迟释放队列: {}", key);
                 return null; // 从 textures 中移除
             }
             return tex;
@@ -292,11 +288,9 @@ public class MMDTextureManager {
             Texture tex = pendingRelease.remove(key);
             if (tex != null) {
                 deleteGlTexture(tex);
-                logger.debug("纹理 TTL 超时释放: {}", key);
             }
         }
         
-        // 2. 检查 pendingRelease 总 VRAM 是否超出软预算
         long pendingVram = getPendingReleaseVram();
         if (pendingVram > budgetBytes && !pendingRelease.isEmpty()) {
             evictByLRU(pendingVram, budgetBytes);
@@ -325,7 +319,6 @@ public class MMDTextureManager {
             }
         }
         if (evicted > 0) {
-            logger.info("VRAM 预算淘汰 {} 个纹理，剩余待释放 VRAM: {}", evicted, remaining);
         }
     }
     
@@ -349,16 +342,12 @@ public class MMDTextureManager {
                 deleteGlTexture(tex);
             }
             textures.clear();
-            logger.info("MMDTextureManager 已清理 {} 个活跃纹理", count);
         }
         int pendingCount = pendingRelease.size();
         for (Texture tex : pendingRelease.values()) {
             deleteGlTexture(tex);
         }
         pendingRelease.clear();
-        if (pendingCount > 0) {
-            logger.info("MMDTextureManager 已清理 {} 个待释放纹理", pendingCount);
-        }
     }
     
     /**

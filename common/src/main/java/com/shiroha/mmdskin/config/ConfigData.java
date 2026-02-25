@@ -55,6 +55,7 @@ public class ConfigData {
     public float physicsMaxLinearVelocity = 20.0f;
     public float physicsMaxAngularVelocity = 20.0f;
     public boolean physicsJointsEnabled = true;
+    public boolean physicsKinematicFilter = true;
     public boolean physicsDebugLog = false;
     
     // 第一人称模型显示
@@ -68,6 +69,10 @@ public class ConfigData {
     // 调试
     public boolean debugHudEnabled = false;
     
+    // VR 联动
+    public boolean vrEnabled = true;
+    public float vrArmIKStrength = 1.0f;
+    
     /**
      * 从文件加载配置
      */
@@ -75,7 +80,6 @@ public class ConfigData {
         Path configFile = configPath.resolve("config.json");
         
         if (!Files.exists(configFile)) {
-            logger.info("配置文件不存在，创建默认配置: {}", configFile);
             ConfigData defaultConfig = new ConfigData();
             defaultConfig.save(configPath);
             return defaultConfig;
@@ -87,7 +91,6 @@ public class ConfigData {
                 logger.warn("配置文件为空，使用默认配置");
                 return new ConfigData();
             }
-            logger.info("配置加载成功: {}", configFile);
             return config;
         } catch (Exception e) {
             logger.error("配置加载失败，使用默认配置: {}", e.getMessage());
@@ -108,7 +111,6 @@ public class ConfigData {
             Path configFile = configPath.resolve("config.json");
             try (Writer writer = Files.newBufferedWriter(configFile)) {
                 GSON.toJson(this, writer);
-                logger.info("配置已保存: {}", configFile);
             }
         } catch (IOException e) {
             logger.error("保存配置失败: {}", e.getMessage());
@@ -116,49 +118,19 @@ public class ConfigData {
     }
     
     /**
-     * 复制当前值到另一个配置对象（直接字段赋值，新增字段时需同步更新）
+     * 复制当前值到另一个配置对象
+     * 通过 Gson 序列化/反序列化实现深拷贝，新增字段时无需手动同步
      */
     public void copyTo(ConfigData other) {
-        // 渲染设置
-        other.openGLEnableLighting = this.openGLEnableLighting;
-        other.modelPoolMaxCount = this.modelPoolMaxCount;
-        other.mmdShaderEnabled = this.mmdShaderEnabled;
-        // GPU 加速
-        other.gpuSkinningEnabled = this.gpuSkinningEnabled;
-        other.gpuMorphEnabled = this.gpuMorphEnabled;
-        other.maxBones = this.maxBones;
-        // Toon 渲染
-        other.toonRenderingEnabled = this.toonRenderingEnabled;
-        other.toonLevels = this.toonLevels;
-        other.toonRimPower = this.toonRimPower;
-        other.toonRimIntensity = this.toonRimIntensity;
-        other.toonShadowR = this.toonShadowR;
-        other.toonShadowG = this.toonShadowG;
-        other.toonShadowB = this.toonShadowB;
-        other.toonSpecularPower = this.toonSpecularPower;
-        other.toonSpecularIntensity = this.toonSpecularIntensity;
-        other.toonOutlineEnabled = this.toonOutlineEnabled;
-        other.toonOutlineWidth = this.toonOutlineWidth;
-        other.toonOutlineR = this.toonOutlineR;
-        other.toonOutlineG = this.toonOutlineG;
-        other.toonOutlineB = this.toonOutlineB;
-        // 物理引擎
-        other.physicsEnabled = this.physicsEnabled;
-        other.physicsGravityY = this.physicsGravityY;
-        other.physicsFps = this.physicsFps;
-        other.physicsMaxSubstepCount = this.physicsMaxSubstepCount;
-        other.physicsInertiaStrength = this.physicsInertiaStrength;
-        other.physicsMaxLinearVelocity = this.physicsMaxLinearVelocity;
-        other.physicsMaxAngularVelocity = this.physicsMaxAngularVelocity;
-        other.physicsJointsEnabled = this.physicsJointsEnabled;
-        other.physicsDebugLog = this.physicsDebugLog;
-        // 第一人称
-        other.firstPersonModelEnabled = this.firstPersonModelEnabled;
-        other.firstPersonCameraForwardOffset = this.firstPersonCameraForwardOffset;
-        other.firstPersonCameraVerticalOffset = this.firstPersonCameraVerticalOffset;
-        // 纹理缓存
-        other.textureCacheBudgetMB = this.textureCacheBudgetMB;
-        // 调试
-        other.debugHudEnabled = this.debugHudEnabled;
+        ConfigData copy = GSON.fromJson(GSON.toJson(this), ConfigData.class);
+        // 利用 Gson 反序列化得到的副本覆盖目标对象的所有字段
+        try {
+            for (var field : ConfigData.class.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                field.set(other, field.get(copy));
+            }
+        } catch (IllegalAccessException e) {
+            logger.error("配置复制失败", e);
+        }
     }
 }

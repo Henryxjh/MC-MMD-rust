@@ -68,7 +68,6 @@ public class ModelCache<T> {
         if (entry != null) {
             entry.updateAccessTime();
             active.put(key, entry);
-            logger.debug("[{}] 从待释放队列恢复: {}", cacheName, key);
             return entry;
         }
         
@@ -78,8 +77,6 @@ public class ModelCache<T> {
     /** 添加缓存项到活跃缓存 */
     public void put(String key, T value) {
         active.put(key, new CacheEntry<>(value));
-        logger.debug("[{}] 添加缓存: {} (活跃: {}, 待释放: {})",
-                cacheName, key, active.size(), pendingRelease.size());
     }
     
     /**
@@ -126,7 +123,6 @@ public class ModelCache<T> {
                     pendingRelease.put(key, entry);
                 }
             }
-            logger.debug("[{}] {} 个空闲条目移入待释放队列", cacheName, idleKeys.size());
         }
         
         if (pendingRelease.isEmpty()) return;
@@ -146,7 +142,6 @@ public class ModelCache<T> {
                     safeDispose(disposer, entry.value, key);
                 }
             }
-            logger.info("[{}] TTL 释放 {} 个过期模型", cacheName, expired.size());
         }
         
         // 3. 容量预算：总数超过上限时按 LRU 淘汰 pending
@@ -176,8 +171,6 @@ public class ModelCache<T> {
             }
         }
         if (evicted > 0) {
-            logger.info("[{}] 容量预算淘汰 {} 个模型 (活跃: {}, 待释放: {})",
-                    cacheName, evicted, active.size(), pendingRelease.size());
         }
     }
     
@@ -217,8 +210,6 @@ public class ModelCache<T> {
             safeDispose(disposer, entry.value, null);
         }
         pendingRelease.clear();
-        
-        logger.info("[{}] 缓存已清空 (活跃: {}, 待释放: {})", cacheName, activeCount, pendingCount);
     }
     
     /** 遍历活跃缓存（供 PerformanceHud 等统计使用） */

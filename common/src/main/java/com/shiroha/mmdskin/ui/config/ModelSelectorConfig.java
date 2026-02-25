@@ -65,7 +65,6 @@ public class ModelSelectorConfig {
                         data.quickModelSlots = new ConcurrentHashMap<>();
                     }
                     
-                    logger.info("模型选择配置加载成功 ({} 个玩家)", data.playerModels.size());
                     return;
                 } catch (Exception e) {
                     retryCount++;
@@ -173,7 +172,6 @@ public class ModelSelectorConfig {
         
         data.playerModels.put(playerName, modelName);
         save();
-        logger.info("玩家 {} 选择模型: {}", playerName, modelName);
         
         // 广播到服务器（联机同步）
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
@@ -188,7 +186,6 @@ public class ModelSelectorConfig {
     public void removePlayerModel(String playerName) {
         if (data.playerModels.remove(playerName) != null) {
             save();
-            logger.info("已移除玩家 {} 的模型选择", playerName);
         }
     }
     
@@ -229,7 +226,6 @@ public class ModelSelectorConfig {
             data.quickModelSlots.put(key, modelName);
         }
         save();
-        logger.info("快捷模型槽位 {} 绑定: {}", slot + 1, modelName);
     }
     
     /**

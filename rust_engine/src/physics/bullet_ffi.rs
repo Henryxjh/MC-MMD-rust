@@ -58,6 +58,7 @@ mod ffi {
         pub fn bw_world_remove_rigid_body(world: *mut BW_World, rb: *mut BW_RigidBody);
         pub fn bw_world_add_constraint(world: *mut BW_World, c: *mut BW_Constraint, disable_collision: bool);
         pub fn bw_world_remove_constraint(world: *mut BW_World, c: *mut BW_Constraint);
+        pub fn bw_world_set_kinematic_filter(world: *mut BW_World, enabled: bool);
 
         // 碰撞形状
         pub fn bw_shape_sphere(radius: c_float) -> *mut BW_Shape;
@@ -159,6 +160,10 @@ impl BulletWorld {
 
     pub fn remove_constraint(&self, constraint: &BulletConstraint) {
         unsafe { ffi::bw_world_remove_constraint(self.ptr, constraint.ptr) }
+    }
+
+    pub fn set_kinematic_filter(&self, enabled: bool) {
+        unsafe { ffi::bw_world_set_kinematic_filter(self.ptr, enabled) }
     }
 }
 

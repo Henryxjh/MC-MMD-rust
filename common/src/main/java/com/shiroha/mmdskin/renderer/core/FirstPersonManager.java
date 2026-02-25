@@ -98,12 +98,6 @@ public final class FirstPersonManager {
         if (shouldEnable != activeFirstPerson) {
             nf.SetFirstPersonMode(modelHandle, shouldEnable);
             activeFirstPerson = shouldEnable;
-            
-            if (shouldEnable) {
-                logger.info("第一人称模式启用: modelScale={}", modelScale);
-            } else {
-                logger.info("第一人称模式禁用");
-            }
         }
         
         // 始终同步缩放值，确保运行时调整缩放后相机位置跟随

@@ -1,10 +1,16 @@
 package com.shiroha.mmdskin.mixin.fabric;
 
+import com.shiroha.mmdskin.compat.vr.VRArmHider;
+import com.shiroha.mmdskin.compat.vr.VRHandRenderer;
 import com.shiroha.mmdskin.fabric.YsmCompat;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.ItemInHandRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.item.ItemStack;
 import com.mojang.blaze3d.vertex.PoseStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -12,14 +18,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * ItemInHandRenderer Mixin — 第一人称手臂隐藏
- * 
- * 在第一人称 MMD 模型模式下，跳过原版手臂和手持物品的渲染。
- * 支持 YSM 兼容：若 YSM 接管，按其配置决定手臂渲染。
+ * ItemInHandRenderer Mixin — 第一人称手臂隐藏 + VR 手部渲染
  */
-@Mixin(ItemInHandRenderer.class)
+@Mixin(value = ItemInHandRenderer.class, priority = 900)
 public abstract class ItemInHandRendererMixin {
-    
+
     @Inject(method = "renderHandsWithItems", at = @At("HEAD"), cancellable = true)
     private void onRenderHandsWithItems(float partialTick, PoseStack poseStack,
             MultiBufferSource.BufferSource bufferSource, LocalPlayer player, int packedLight,
@@ -31,7 +34,6 @@ public abstract class ItemInHandRendererMixin {
         boolean isMmdActive = !isMmdDefault;
         boolean isVanilaMmdModel = isMmdActive && (selectedModel.equals("VanilaModel") || selectedModel.equalsIgnoreCase("vanila"));
 
-        // YSM 接管时，按 YSM 配置决定手臂渲染
         if (YsmCompat.isYsmModelActive(player)) {
             if (YsmCompat.isDisableSelfHands()) {
                 ci.cancel();
@@ -39,8 +41,36 @@ public abstract class ItemInHandRendererMixin {
             return;
         }
 
-        // 无 YSM 时，非原版 MMD 模型下取消手臂渲染
         if (isMmdActive && !isVanilaMmdModel) {
+            ci.cancel();
+        }
+    }
+
+    /**
+     * 拦截 Vivecraft VR 方块手臂渲染
+     * MMD 身体（含手臂）已由 PlayerMixinDelegate 在世界空间渲染，
+     * 此处只需隐藏 Vivecraft 的方块手臂，保留物品渲染。
+     */
+    @Inject(method = "renderArmWithItem", at = @At("HEAD"), cancellable = true)
+    private void onRenderArmWithItem(AbstractClientPlayer player, float partialTick,
+            float pitch, InteractionHand hand, float swingProgress, ItemStack itemStack,
+            float equippedProgress, PoseStack poseStack, MultiBufferSource buffer,
+            int combinedLight, CallbackInfo ci) {
+        if (VRArmHider.shouldHideVRArms()) {
+            // 隐藏方块手臂，但保留手持物品渲染
+            VRHandRenderer.renderHandItem(poseStack, buffer, combinedLight, hand);
+            ci.cancel();
+        }
+    }
+
+    /**
+     * 拦截 Vivecraft VR 裸手臂渲染（无物品时）
+     */
+    @Inject(method = "renderPlayerArm", at = @At("HEAD"), cancellable = true)
+    private void onRenderPlayerArm(PoseStack poseStack, MultiBufferSource buffer,
+            int combinedLight, float equippedProgress, float swingProgress,
+            HumanoidArm side, CallbackInfo ci) {
+        if (VRArmHider.shouldHideVRArms()) {
             ci.cancel();
         }
     }

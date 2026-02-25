@@ -548,6 +548,20 @@ impl BoneSet {
         self.links[index].animation_translate = translation - self.links[index].body_shift;
     }
     
+    /// 更新单个骨骼的全局变换（VR IK 用：头部旋转后刷新子骨骼链）
+    pub fn update_single_bone_global(&mut self, index: usize) {
+        if index >= self.links.len() { return; }
+        self.links[index].compute_local_transform();
+        let parent_idx = self.links[index].parent_index;
+        if parent_idx >= 0 && (parent_idx as usize) < self.links.len() {
+            self.links[index].local_to_world =
+                self.links[parent_idx as usize].local_to_world * self.links[index].local_to_parent;
+        } else {
+            self.links[index].local_to_world = self.links[index].local_to_parent;
+        }
+        self.update_children_global_transform(index);
+    }
+
     /// 递归更新子骨骼全局变换
     fn update_children_global_transform(&mut self, parent_index: usize) {
         let parent_global = self.links[parent_index].local_to_world;

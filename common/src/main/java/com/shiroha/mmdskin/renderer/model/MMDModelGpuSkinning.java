@@ -163,7 +163,7 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
         }
         
         if (model == 0) {
-            logger.info("无法打开模型: '{}'", modelFilename);
+            logger.warn("无法打开模型: '{}'", modelFilename);
             return null;
         }
         
@@ -208,7 +208,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
         int[] uvMorphBuffers = null;
         FloatBuffer uvMorphWeightsBuf = null;
         int skinnedUvBuf = 0;
-        FloatBuffer matMorphResultsBuf = null;
         ByteBuffer matMorphResultsByteBuf = null;
         ByteBuffer subMeshDataBufLocal = null;
         MMDMaterial lightMapMaterial = null;
@@ -226,7 +225,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
                 logger.warn("模型骨骼数量 ({}) 超过最大支持 ({})，部分骨骼可能无法正确渲染", 
                     boneCount, ShaderConstants.MAX_BONES);
             }
-            logger.info("GPU 蒙皮模型加载（Compute Shader）: {} 顶点, {} 骨骼", vertexCount, boneCount);
             
             // 创建 VAO 和 VBO
             vao = GL46C.glGenVertexArrays();
@@ -413,7 +411,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
             if (morphCount > 0) {
                 morphWeightsBuffer = MemoryUtil.memAllocFloat(morphCount);
                 morphBuffers = SkinningComputeShader.createMorphBuffers(morphCount);
-                logger.info("GPU Morph 初始化: {} 个顶点 Morph", morphCount);
             }
             
             // 初始化 UV Morph 数据
@@ -423,7 +420,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
                 uvMorphWeightsBuf = MemoryUtil.memAllocFloat(uvMorphCnt);
                 uvMorphBuffers = SkinningComputeShader.createUvMorphBuffers(uvMorphCnt);
                 skinnedUvBuf = SkinningComputeShader.createSkinnedUvBuffer(vertexCount);
-                logger.info("GPU UV Morph 初始化: {} 个 UV Morph", uvMorphCnt);
             } else {
                 // 即使没有 UV Morph，也创建蒙皮 UV 输出缓冲区用于 Compute Shader 写入
                 skinnedUvBuf = SkinningComputeShader.createSkinnedUvBuffer(vertexCount);
@@ -433,7 +429,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
             int matMorphCount = nf.GetMaterialMorphResultCount(model);
             if (matMorphCount > 0) {
                 int floatCount = matMorphCount * 56;
-                matMorphResultsBuf = MemoryUtil.memAllocFloat(floatCount);
                 matMorphResultsByteBuf = MemoryUtil.memAlloc(floatCount * 4);
                 matMorphResultsByteBuf.order(ByteOrder.LITTLE_ENDIAN);
             }
@@ -491,7 +486,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
             }
             // 材质 Morph
             result.materialMorphResultCount = matMorphCount;
-            result.materialMorphResultsBuffer = matMorphResultsBuf;
             result.materialMorphResultsByteBuffer = matMorphResultsByteBuf;
             result.subMeshCount = (int) nf.GetSubMeshCount(model);
             subMeshDataBufLocal = MemoryUtil.memAlloc(result.subMeshCount * 20);
@@ -503,7 +497,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
             nf.SetAutoBlinkEnabled(model, true);
             
             GL46C.glBindVertexArray(0);
-            logger.info("GPU 蒙皮模型创建成功（Compute Shader）: {} 顶点, {} 骨骼", vertexCount, boneCount);
             return result;
             
         } catch (Exception e) {
@@ -548,7 +541,6 @@ public class MMDModelGpuSkinning extends AbstractMMDModel {
             if (projMatBuff != null) MemoryUtil.memFree(projMatBuff);
             if (morphWeightsBuffer != null) MemoryUtil.memFree(morphWeightsBuffer);
             if (uvMorphWeightsBuf != null) MemoryUtil.memFree(uvMorphWeightsBuf);
-            if (matMorphResultsBuf != null) MemoryUtil.memFree(matMorphResultsBuf);
             if (matMorphResultsByteBuf != null) MemoryUtil.memFree(matMorphResultsByteBuf);
             if (subMeshDataBufLocal != null) MemoryUtil.memFree(subMeshDataBufLocal);
             

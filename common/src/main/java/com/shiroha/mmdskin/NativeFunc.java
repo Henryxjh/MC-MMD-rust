@@ -117,6 +117,8 @@ public class NativeFunc {
      */
     public native void SetLayerLoop(long model, long layer, boolean loop);
 
+    public native void SeekLayer(long model, long layer, float frame);
+
     public native void ResetModelPhysics(long model);
 
     public native long CreateMat();
@@ -697,6 +699,7 @@ public class NativeFunc {
         float maxLinearVelocity,
         float maxAngularVelocity,
         boolean jointsEnabled,
+        boolean kinematicFilter,
         boolean debugLog
     );
     
@@ -768,4 +771,35 @@ public class NativeFunc {
      * @return 内存占用字节数
      */
     public native long GetModelMemoryUsage(long model);
+    
+    // ==================== VR 联动相关 ====================
+    
+    /**
+     * 批量传递 VR 追踪数据（3 追踪点 × 7 float = 21 float）
+     * 布局：[head(7), mainHand(7), offHand(7)]，每组 [posX,posY,posZ, quatX,quatY,quatZ,quatW]
+     * @param model 模型句柄
+     * @param trackingData 追踪数据数组（长度 21）
+     */
+    public native void SetVRTrackingData(long model, float[] trackingData);
+    
+    /**
+     * 启用/禁用模型的 VR 模式
+     * @param model 模型句柄
+     * @param enabled 是否启用
+     */
+    public native void SetVREnabled(long model, boolean enabled);
+    
+    /**
+     * 设置 VR IK 参数
+     * @param model 模型句柄
+     * @param armIKStrength 手臂 IK 强度 (0.0~1.0)
+     */
+    public native void SetVRIKParams(long model, float armIKStrength);
+    
+    /**
+     * 设置 VR 手部渲染模式（0=全身, 1=仅左手, 2=仅右手）
+     * @param model 模型句柄
+     * @param mode 手部模式
+     */
+    public native void SetVRHandMode(long model, int mode);
 }

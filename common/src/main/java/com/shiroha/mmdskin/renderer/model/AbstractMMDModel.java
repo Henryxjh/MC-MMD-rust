@@ -20,7 +20,6 @@ import org.joml.Vector3f;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
-import java.nio.FloatBuffer;
 import java.util.List;
 
 /**
@@ -51,12 +50,21 @@ public abstract class AbstractMMDModel implements IMMDModel {
     protected final Quaternionf tempQuat = new Quaternionf();
 
     // 材质 Morph
-    protected FloatBuffer materialMorphResultsBuffer;
     protected ByteBuffer materialMorphResultsByteBuffer;
     protected int materialMorphResultCount = 0;
 
     // 纹理引用键（dispose 时用于批量释放引用计数）
     protected List<String> textureKeys;
+
+    // VR 模式标志（由 PlayerMixinDelegate 在渲染前设置）
+    private volatile boolean vrActive;
+
+    // ===== VR 状态 =====
+
+    /** 设置 VR 激活状态（渲染前由 PlayerMixinDelegate 调用） */
+    public void setVrActive(boolean active) { this.vrActive = active; }
+
+    public boolean isVrActive() { return vrActive; }
 
     // ===== NativeFunc 访问 =====
 
@@ -126,10 +134,11 @@ public abstract class AbstractMMDModel implements IMMDModel {
                                      int packedLight, RenderContext context) {
         boolean stagePlaying = MMDCameraController.getInstance().isStagePlayingModel(model);
 
-        // 头部角度（舞台播放时归零，由 VMD 动画控制）
+        // 头部角度（优先级：舞台播放 > VR 追踪 > 普通头部角度）
         if (stagePlaying) {
             getNf().SetHeadAngle(model, 0.0f, 0.0f, 0.0f, context.isWorldScene());
-        } else {
+        } else if (!vrActive) {
+            // 非 VR 模式：使用普通头部角度计算
             float headAngleX = Mth.clamp(entityIn.getXRot(), -50.0f, 50.0f);
             float headAngleY = (entityYaw - Mth.lerp(tickDelta, entityIn.yHeadRotO, entityIn.yHeadRot)) % 360.0f;
             if (headAngleY < -180.0f) headAngleY += 360.0f;
@@ -142,9 +151,10 @@ public abstract class AbstractMMDModel implements IMMDModel {
                     : headAngleY * ((float) Math.PI / 180F);
             getNf().SetHeadAngle(model, pitchRad, yawRad, 0.0f, context.isWorldScene());
         }
+        // VR 模式：跳过 SetHeadAngle，由 Rust VR IK 接管头部旋转
 
-        // 眼球追踪
-        if (!stagePlaying) {
+        // 眼球追踪（VR 模式下跳过，由 VR 头部追踪替代）
+        if (!stagePlaying && !vrActive) {
             EyeTrackingHelper.updateEyeTracking(getNf(), model, entityIn, entityYaw, tickDelta, getModelName());
         }
 
@@ -182,13 +192,10 @@ public abstract class AbstractMMDModel implements IMMDModel {
      * 获取材质 Morph 结果
      */
     protected void fetchMaterialMorphResults() {
-        if (materialMorphResultCount <= 0 || materialMorphResultsBuffer == null) return;
+        if (materialMorphResultCount <= 0 || materialMorphResultsByteBuffer == null) return;
         materialMorphResultsByteBuffer.clear();
         getNf().CopyMaterialMorphResultsToBuffer(model, materialMorphResultsByteBuffer);
-        materialMorphResultsBuffer.clear();
-        materialMorphResultsByteBuffer.position(0);
-        materialMorphResultsBuffer.put(materialMorphResultsByteBuffer.asFloatBuffer());
-        materialMorphResultsBuffer.flip();
+        materialMorphResultsByteBuffer.rewind();
     }
 
     /**
@@ -196,11 +203,12 @@ public abstract class AbstractMMDModel implements IMMDModel {
      * 布局：每材质 56 float = mul(28) + add(28)，diffuse.w 在各组偏移 3
      */
     protected float getEffectiveMaterialAlpha(int materialIndex, float baseAlpha) {
-        if (materialMorphResultsBuffer == null || materialIndex >= materialMorphResultCount) return baseAlpha;
+        if (materialMorphResultsByteBuffer == null || materialIndex >= materialMorphResultCount) return baseAlpha;
         int mulOffset = materialIndex * 56 + 3;
         int addOffset = materialIndex * 56 + 28 + 3;
-        float mulAlpha = (mulOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(mulOffset) : 1.0f;
-        float addAlpha = (addOffset < materialMorphResultsBuffer.capacity()) ? materialMorphResultsBuffer.get(addOffset) : 0.0f;
+        int capacity = materialMorphResultsByteBuffer.capacity() / 4;
+        float mulAlpha = (mulOffset < capacity) ? materialMorphResultsByteBuffer.getFloat(mulOffset * 4) : 1.0f;
+        float addAlpha = (addOffset < capacity) ? materialMorphResultsByteBuffer.getFloat(addOffset * 4) : 0.0f;
         return baseAlpha * mulAlpha + addAlpha;
     }
 
@@ -231,10 +239,6 @@ public abstract class AbstractMMDModel implements IMMDModel {
 
     /** 释放材质 Morph 缓冲区 */
     protected void disposeMaterialMorphBuffers() {
-        if (materialMorphResultsBuffer != null) {
-            MemoryUtil.memFree(materialMorphResultsBuffer);
-            materialMorphResultsBuffer = null;
-        }
         if (materialMorphResultsByteBuffer != null) {
             MemoryUtil.memFree(materialMorphResultsByteBuffer);
             materialMorphResultsByteBuffer = null;

@@ -90,7 +90,6 @@ public class MMDModelManager {
         
         modelCache = new ModelCache<>("MMDModel");
         RenderModeManager.init();
-        logger.info("MMDModelManager 初始化完成（异步加载模式）");
     }
 
     /**
@@ -186,7 +185,6 @@ public class MMDModelManager {
                     return null;
                 }
                 
-                // 检查是否已被取消（key 被从 pendingLoads 中移除，或被 cancel(true) 中断）
                 if (!pendingLoads.containsKey(fullCacheKey) || Thread.interrupted()) {
                     logger.info("[异步加载] 后台任务已被取消，释放句柄: {}", modelName);
                     nf.DeleteModel(handle);
@@ -195,10 +193,8 @@ public class MMDModelManager {
                 
                 logger.info("[异步加载] 模型解析完成 ({}ms)，开始预解码纹理: {}", elapsed, modelName);
                 
-                // Phase 1.5：预解码所有材质纹理（Rust 解码图片，不涉及 GL）
                 preloadModelTextures(nf, handle, modelInfo.getFolderPath());
                 
-                // 再次检查取消状态（纹理预解码可能耗时较长）
                 if (!pendingLoads.containsKey(fullCacheKey) || Thread.interrupted()) {
                     logger.info("[异步加载] 后台任务已被取消（纹理预解码后），释放句柄: {}", modelName);
                     nf.DeleteModel(handle);
@@ -248,7 +244,6 @@ public class MMDModelManager {
             MMDTextureManager.preloadTexture(modelDir + "/lightMap.png");
             
             if (preloaded > 0) {
-                logger.info("[异步加载] 预解码 {} 个材质纹理", preloaded);
             }
         } catch (Exception e) {
             logger.warn("[异步加载] 纹理预解码部分失败（不影响后续加载）", e);
@@ -278,7 +273,7 @@ public class MMDModelManager {
             totalModelsLoaded.incrementAndGet();
             
             long elapsed = System.currentTimeMillis() - startTime;
-            logger.info("[异步加载] GL 资源创建完成 ({}ms): {} (缓存: {})", elapsed, fullCacheKey, modelCache.size());
+            logger.info("[异步加载] GL 资源创建完成 ({}ms): {}", elapsed, fullCacheKey);
             return model;
         } catch (Exception e) {
             logger.error("[异步加载] GL 资源创建异常: {}", fullCacheKey, e);
@@ -348,7 +343,6 @@ public class MMDModelManager {
         modelCache.clear(MMDModelManager::disposeModel);
         MaidMMDModelManager.invalidateLoadedModels();
         MMDTextureManager.clearPreloaded();
-        logger.info("强制重载所有模型完成");
     }
     
     /**
@@ -364,7 +358,6 @@ public class MMDModelManager {
             pendingLoads.clear();
             failedLoads.clear();
             MMDTextureManager.clearPreloaded();
-            logger.info("已取消 {} 个后台加载任务", count);
         }
     }
     
@@ -380,7 +373,6 @@ public class MMDModelManager {
                     AsyncLoadResult result = future.get();
                     if (result != null && result.modelHandle != 0) {
                         NativeFunc.GetInst().DeleteModel(result.modelHandle);
-                        logger.info("[异步加载] 清理已完成但未消费的模型句柄: {}", result.modelName);
                     }
                 } catch (Exception ignored) {}
             }
@@ -402,7 +394,7 @@ public class MMDModelManager {
      * 创建模型包装器
      */
     private static Model createModelWrapper(String name, IMMDModel model, String modelName) {
-        ModelWithEntityData m = new ModelWithEntityData();
+        Model m = new Model();
         m.entityName = name;
         m.model = model;
         m.modelName = modelName;
@@ -433,8 +425,6 @@ public class MMDModelManager {
                     nf.SetMaterialVisible(modelHandle, index, false);
                 }
             }
-            
-            logger.debug("已恢复 {} 个隐藏材质: {}", config.hiddenMaterials.size(), modelName);
         } catch (Exception e) {
             logger.warn("恢复材质可见性失败: {}", modelName, e);
         }
@@ -445,7 +435,6 @@ public class MMDModelManager {
         modelCache.clear(MMDModelManager::disposeModel);
         MaidMMDModelManager.invalidateLoadedModels();
         MMDTextureManager.clearPreloaded();
-        logger.info("模型已重载");
     }
     
     /**
@@ -564,8 +553,4 @@ public class MMDModelManager {
         } 
     }
 
-    /** @deprecated 已合并到 Model，保留为类型别名以兼容 fabric/forge Mixin 引用 */
-    @Deprecated
-    public static class ModelWithEntityData extends Model {
-    }
 }
