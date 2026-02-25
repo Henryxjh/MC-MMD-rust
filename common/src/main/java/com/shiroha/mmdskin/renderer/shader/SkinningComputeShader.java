@@ -121,7 +121,6 @@ public class SkinningComputeShader {
             uvMorphCountLocation = GL43C.glGetUniformLocation(program, "UvMorphCount");
             
             initialized = true;
-            logger.info("蒙皮 Compute Shader 初始化成功");
             return true;
             
         } catch (Exception e) {

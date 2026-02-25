@@ -55,10 +55,6 @@ public class MMDAnimManager {
         
         // 确保目录存在
         ensureDirectoriesExist();
-        
-        logger.info("MMDAnimManager 初始化完成 (使用 ConcurrentHashMap)");
-        logger.info("默认动画目录: " + defaultAnimDir);
-        logger.info("自定义动画目录: " + customAnimDir);
     }
 
     /**
@@ -69,11 +65,9 @@ public class MMDAnimManager {
         File customDir = PathConstants.getCustomAnimDir();
         
         if (PathConstants.ensureDirectoryExists(defaultDir)) {
-            logger.info("创建默认动画目录: " + defaultAnimDir);
         }
         
         if (PathConstants.ensureDirectoryExists(customDir)) {
-            logger.info("创建自定义动画目录: " + customAnimDir);
         }
     }
 
@@ -85,8 +79,10 @@ public class MMDAnimManager {
         if (nf == null || animModel == null) return;
         Map<String, Long> sub = animModel.get(model);
         if (sub != null) {
-            for (Long i : sub.values()) {
-                nf.DeleteAnimation(i);
+            for (Long handle : sub.values()) {
+                if (handle != null) {
+                    nf.DeleteAnimation(handle);
+                }
             }
         }
         animModel.remove(model);
@@ -156,7 +152,6 @@ public class MMDAnimManager {
         // 记录加载结果
         if (anim != 0) {
             sub.put(animName, anim);
-            logger.info("加载动画 '{}' 成功，来源: {}", animName, loadedFrom);
         } else {
             if (warnedAnimations.add(animName)) {
                 logger.warn("未找到动画文件: {}", animName);
@@ -217,7 +212,6 @@ public class MMDAnimManager {
                 nf.DeleteAnimation(handle);
             }
             sub.clear();
-            logger.info("模型动画缓存已清除");
         }
     }
 

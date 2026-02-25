@@ -164,6 +164,8 @@ impl MMDPhysics {
         // 预分配动态骨骼缓冲区
         self.dynamic_bone_buf.reserve(self.dynamic_bone_indices.len());
 
+        self.world.set_kinematic_filter(config.kinematic_filter);
+
         let kinematic_count = self.rigid_bodies.iter()
             .filter(|rb| rb.physics_mode == PhysicsMode::FollowBone).count();
         let dynamic_count = self.rigid_bodies.iter()

@@ -4,6 +4,7 @@ use crate::animation::{VmdAnimation, AnimationLayerManager};
 use crate::morph::MorphManager;
 use crate::physics::MMDPhysics;
 use crate::skeleton::BoneManager;
+use crate::vr::VrIkSolver;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -137,6 +138,9 @@ pub struct MmdModel {
     /// GPU UV Morph 数据是否已初始化
     gpu_uv_morph_initialized: bool,
     
+    /// Group/Flip Morph 递归展开后的有效权重缓冲区（每帧复用，避免分配）
+    effective_weights_buf: Vec<f32>,
+    
     /// 材质 Morph 结果展平缓存（避免每帧分配）
     material_morph_results_flat_cache: Vec<f32>,
     
@@ -158,6 +162,26 @@ pub struct MmdModel {
     eye_bone_index: Option<usize>,
     /// 左/右目的索引（用于取中点）
     eye_bone_pair: Option<(usize, usize)>,
+    
+    // ======== VR 手部模式 ========
+    /// VR 手部渲染模式：0=全身, 1=仅左手, 2=仅右手
+    vr_hand_mode: u8,
+    /// 每个子网格的手部归属标记：0=身体, 1=左手, 2=右手
+    hand_submesh_flags: Vec<u8>,
+    /// 手部检测是否已初始化
+    hand_detection_initialized: bool,
+    /// 进入手部模式前的材质可见性备份
+    hand_mode_visible_backup: Vec<bool>,
+    
+    // ======== VR 联动 ========
+    /// VR 模式是否启用
+    vr_enabled: bool,
+    /// VR 追踪数据（3 追踪点 × 7 float = 21）
+    vr_tracking_data: [f32; 21],
+    /// VR 手臂 IK 强度 (0.0~1.0)
+    vr_ik_strength: f32,
+    /// VR IK 求解器（缓存骨骼索引）
+    vr_ik_solver: VrIkSolver,
     
     // ======== 矩阵插值过渡 ========
     /// 缓存的蒙皮矩阵（过渡开始时的状态）
@@ -230,8 +254,17 @@ impl MmdModel {
             uv_morph_indices: Vec::new(),
             uv_morph_count: 0,
             gpu_uv_morph_initialized: false,
+            effective_weights_buf: Vec::new(),
             material_morph_results_flat_cache: Vec::new(),
             vpd_bone_overrides: HashMap::new(),
+            vr_hand_mode: 0,
+            hand_submesh_flags: Vec::new(),
+            hand_detection_initialized: false,
+            hand_mode_visible_backup: Vec::new(),
+            vr_enabled: false,
+            vr_tracking_data: [0.0; 21],
+            vr_ik_strength: 1.0,
+            vr_ik_solver: VrIkSolver::new(),
             transition_matrices: Vec::new(),
             transition_progress: 0.0,
             transition_duration: 0.0,
@@ -828,11 +861,21 @@ impl MmdModel {
         // 自动眨眼
         self.update_auto_blink(elapsed);
 
-        self.apply_head_rotation();
+        // VR 模式下跳过普通头部旋转，由 VR IK 接管
+        if !self.vr_enabled {
+            self.apply_head_rotation();
+        }
         self.update_morph_animation();
         
-        // 骨骼更新（物理前）
+        // 骨骼更新（物理前）— 先计算当前帧全局变换
         self.update_node_animation(false);
+        
+        // VR IK 求解（在全局变换计算之后，确保用当前帧的骨骼位置）
+        if self.vr_enabled {
+            let tracking = self.vr_tracking_data;
+            let strength = self.vr_ik_strength;
+            self.vr_ik_solver.solve(&mut self.bone_manager, &tracking, strength);
+        }
         
         // 物理更新
         self.update_physics(elapsed);
@@ -1377,10 +1420,9 @@ impl MmdModel {
         self.original_normals.as_ptr()
     }
     
-    // ========== GPU Morph 相关方法 ==========
+    // ========== GPU Morph ==========
     
-    /// 初始化 GPU Morph 数据
-    /// 将稀疏的顶点 Morph 偏移转换为密集格式，供 GPU Compute Shader 使用
+    /// 初始化 GPU 顶点 Morph 数据（稀疏→密集格式）
     pub fn init_gpu_morph_data(&mut self) {
         if self.gpu_morph_initialized {
             return;
@@ -1437,51 +1479,61 @@ impl MmdModel {
         );
     }
     
-    /// 更新 GPU Morph 权重数组（从 MorphManager 同步）
+    /// 计算并缓存所有 Morph 的有效权重（递归展开 Group/Flip）
+    fn compute_and_cache_effective_weights(&mut self) {
+        let morph_count = self.morph_manager.morph_count();
+        if morph_count == 0 {
+            return;
+        }
+        self.effective_weights_buf.resize(morph_count, 0.0);
+        for w in self.effective_weights_buf.iter_mut() {
+            *w = 0.0;
+        }
+        self.morph_manager.compute_effective_weights_into(&mut self.effective_weights_buf);
+    }
+    
+    /// 同步 GPU Morph 权重（公共接口，供 JNI 调用）
     pub fn sync_gpu_morph_weights(&mut self) {
+        self.compute_and_cache_effective_weights();
+        self.sync_gpu_morph_weights_from_cache();
+        self.sync_gpu_uv_morph_weights_from_cache();
+    }
+    
+    /// 同步 GPU 顶点 Morph 有效权重（从已缓存的有效权重读取）
+    fn sync_gpu_morph_weights_from_cache(&mut self) {
         if !self.gpu_morph_initialized || self.vertex_morph_count == 0 {
             return;
         }
-        
-        // 使用保存的索引映射同步权重
         for (gpu_idx, &morph_idx) in self.vertex_morph_indices.iter().enumerate() {
-            if gpu_idx < self.gpu_morph_weights.len() {
-                if let Some(morph) = self.morph_manager.get_morph(morph_idx) {
-                    self.gpu_morph_weights[gpu_idx] = morph.weight;
-                }
+            if gpu_idx < self.gpu_morph_weights.len() && morph_idx < self.effective_weights_buf.len() {
+                self.gpu_morph_weights[gpu_idx] = self.effective_weights_buf[morph_idx];
             }
         }
     }
     
-    /// 获取顶点 Morph 数量
     pub fn get_vertex_morph_count(&self) -> usize {
         self.vertex_morph_count
     }
     
-    /// 获取 GPU Morph 偏移数据指针
     pub fn get_gpu_morph_offsets_ptr(&self) -> *const f32 {
         self.gpu_morph_offsets.as_ptr()
     }
     
-    /// 获取 GPU Morph 偏移数据大小（字节）
     pub fn get_gpu_morph_offsets_size(&self) -> usize {
         self.gpu_morph_offsets.len() * 4
     }
     
-    /// 获取 GPU Morph 权重数据指针
     pub fn get_gpu_morph_weights_ptr(&self) -> *const f32 {
         self.gpu_morph_weights.as_ptr()
     }
     
-    /// 获取 GPU Morph 是否已初始化
     pub fn is_gpu_morph_initialized(&self) -> bool {
         self.gpu_morph_initialized
     }
     
-    // ========== GPU UV Morph 相关方法 ==========
+    // ========== GPU UV Morph ==========
     
-    /// 初始化 GPU UV Morph 数据
-    /// 将稀疏的 UV Morph 偏移转换为密集格式，供 GPU Compute Shader 使用
+    /// 初始化 GPU UV Morph 数据（稀疏→密集格式）
     pub fn init_gpu_uv_morph_data(&mut self) {
         if self.gpu_uv_morph_initialized {
             return;
@@ -1540,16 +1592,14 @@ impl MmdModel {
         );
     }
     
-    /// 同步 GPU UV Morph 权重
-    pub fn sync_gpu_uv_morph_weights(&mut self) {
+    /// 同步 GPU UV Morph 有效权重（从已缓存的有效权重读取）
+    fn sync_gpu_uv_morph_weights_from_cache(&mut self) {
         if !self.gpu_uv_morph_initialized || self.uv_morph_count == 0 {
             return;
         }
         for (gpu_idx, &morph_idx) in self.uv_morph_indices.iter().enumerate() {
-            if gpu_idx < self.gpu_uv_morph_weights.len() {
-                if let Some(morph) = self.morph_manager.get_morph(morph_idx) {
-                    self.gpu_uv_morph_weights[gpu_idx] = morph.weight;
-                }
+            if gpu_idx < self.gpu_uv_morph_weights.len() && morph_idx < self.effective_weights_buf.len() {
+                self.gpu_uv_morph_weights[gpu_idx] = self.effective_weights_buf[morph_idx];
             }
         }
     }
@@ -1658,14 +1708,26 @@ impl MmdModel {
         // 自动眨眼
         self.update_auto_blink(elapsed);
         
-        self.apply_head_rotation();
+        // VR 模式下跳过普通头部旋转，由 VR IK 接管
+        if !self.vr_enabled {
+            self.apply_head_rotation();
+        }
         self.update_morph_animation();
         
-        // Morph 应用后同步 GPU 权重（顶点 Morph + UV Morph）
-        self.sync_gpu_morph_weights();
-        self.sync_gpu_uv_morph_weights();
+        // 一次性计算所有 Morph 有效权重，供顶点和 UV Morph 同步使用
+        self.compute_and_cache_effective_weights();
+        self.sync_gpu_morph_weights_from_cache();
+        self.sync_gpu_uv_morph_weights_from_cache();
         
+        // 骨骼更新（物理前）— 先计算当前帧全局变换
         self.update_node_animation(false);
+        
+        // VR IK 求解（在全局变换计算之后，确保用当前帧的骨骼位置）
+        if self.vr_enabled {
+            let tracking = self.vr_tracking_data;
+            let strength = self.vr_ik_strength;
+            self.vr_ik_solver.solve(&mut self.bone_manager, &tracking, strength);
+        }
         
         // 记录物理更新前的动态骨骼数量
         let physics_enabled = self.physics_enabled && self.physics.is_some();
@@ -1844,6 +1906,176 @@ impl MmdModel {
             info
         } else {
             String::from("{\"error\": \"no physics\"}")
+        }
+    }
+    
+    // ======== VR 联动 ========
+    
+    pub fn set_vr_enabled(&mut self, enabled: bool) {
+        self.vr_enabled = enabled;
+    }
+    
+    pub fn is_vr_enabled(&self) -> bool {
+        self.vr_enabled
+    }
+    
+    /// 设置 VR 追踪数据（长度必须为 21）
+    pub fn set_vr_tracking_data(&mut self, data: &[f32]) {
+        if data.len() == 21 {
+            self.vr_tracking_data.copy_from_slice(data);
+        }
+    }
+    
+    pub fn set_vr_ik_strength(&mut self, strength: f32) {
+        self.vr_ik_strength = strength.clamp(0.0, 1.0);
+    }
+    
+    pub fn vr_tracking_data(&self) -> &[f32; 21] {
+        &self.vr_tracking_data
+    }
+    
+    pub fn vr_ik_strength(&self) -> f32 {
+        self.vr_ik_strength
+    }
+    
+    // ======== VR 手部模式 ========
+    
+    /// 初始化手部子网格检测（基于骨骼权重判断左/右手归属）
+    fn init_hand_detection(&mut self) {
+        if self.hand_detection_initialized {
+            return;
+        }
+        self.hand_detection_initialized = true;
+        
+        // 收集左/右手骨骼索引
+        let left_names = ["左腕", "左手首", "左親指０", "左親指１", "左親指２",
+            "左人指１", "左人指２", "左人指３", "左中指１", "左中指２", "左中指３",
+            "左薬指１", "左薬指２", "左薬指３", "左小指１", "左小指２", "左小指３"];
+        let right_names = ["右腕", "右手首", "右親指０", "右親指１", "右親指２",
+            "右人指１", "右人指２", "右人指３", "右中指１", "右中指２", "右中指３",
+            "右薬指１", "右薬指２", "右薬指３", "右小指１", "右小指２", "右小指３"];
+        
+        let mut left_bones = std::collections::HashSet::new();
+        let mut right_bones = std::collections::HashSet::new();
+        
+        for name in &left_names {
+            if let Some(idx) = self.bone_manager.find_bone_by_name(name) {
+                left_bones.insert(idx as i32);
+            }
+        }
+        for name in &right_names {
+            if let Some(idx) = self.bone_manager.find_bone_by_name(name) {
+                right_bones.insert(idx as i32);
+            }
+        }
+        
+        log::info!("VR 手部检测: 左手骨骼={}, 右手骨骼={}", left_bones.len(), right_bones.len());
+        
+        if left_bones.is_empty() && right_bones.is_empty() {
+            self.hand_submesh_flags = vec![0u8; self.submeshes.len()];
+            log::warn!("未找到手部骨骼，手部模式不可用");
+            return;
+        }
+        
+        // 对每个子网格，统计顶点的骨骼权重归属
+        self.hand_submesh_flags = Vec::with_capacity(self.submeshes.len());
+        
+        for submesh in &self.submeshes {
+            let begin = submesh.begin_index as usize;
+            let count = submesh.index_count as usize;
+            let mut left_weight_sum = 0.0f32;
+            let mut right_weight_sum = 0.0f32;
+            let mut total_weight_sum = 0.0f32;
+            
+            for idx_offset in 0..count {
+                let index_pos = begin + idx_offset;
+                if index_pos >= self.indices.len() { break; }
+                let vi = self.indices[index_pos] as usize;
+                if vi >= self.weights.len() { continue; }
+                
+                // 提取该顶点的骨骼索引和权重
+                let pairs: Vec<(i32, f32)> = match &self.weights[vi] {
+                    VertexWeight::Bdef1 { bone } => vec![(*bone, 1.0)],
+                    VertexWeight::Bdef2 { bones, weight } => {
+                        vec![(bones[0], *weight), (bones[1], 1.0 - *weight)]
+                    }
+                    VertexWeight::Bdef4 { bones, weights } => {
+                        (0..4).map(|j| (bones[j], weights[j])).collect()
+                    }
+                    VertexWeight::Sdef { bones, weight, .. } => {
+                        vec![(bones[0], *weight), (bones[1], 1.0 - *weight)]
+                    }
+                    VertexWeight::Qdef { bones, weights } => {
+                        (0..4).map(|j| (bones[j], weights[j])).collect()
+                    }
+                };
+                
+                for (bone_id, w) in &pairs {
+                    total_weight_sum += w;
+                    if left_bones.contains(bone_id) { left_weight_sum += w; }
+                    if right_bones.contains(bone_id) { right_weight_sum += w; }
+                }
+            }
+            
+            // 阈值：超过 60% 权重属于某只手则标记
+            let flag = if total_weight_sum > 0.0 {
+                let left_ratio = left_weight_sum / total_weight_sum;
+                let right_ratio = right_weight_sum / total_weight_sum;
+                if left_ratio > 0.6 { 1u8 }
+                else if right_ratio > 0.6 { 2u8 }
+                else { 0u8 }
+            } else { 0u8 };
+            
+            self.hand_submesh_flags.push(flag);
+            
+            if flag != 0 {
+                let mat_name = self.materials.get(submesh.material_id as usize)
+                    .map(|m| m.name.as_str()).unwrap_or("?");
+                let side = if flag == 1 { "左手" } else { "右手" };
+                log::info!("  [{}] submesh={}, material={}", side, 
+                    self.hand_submesh_flags.len() - 1, mat_name);
+            }
+        }
+    }
+    
+    /// 设置 VR 手部渲染模式
+    /// mode: 0=全身（恢复）, 1=仅左手, 2=仅右手
+    pub fn set_vr_hand_mode(&mut self, mode: u8) {
+        if !self.hand_detection_initialized {
+            self.init_hand_detection();
+        }
+        
+        let old_mode = self.vr_hand_mode;
+        self.vr_hand_mode = mode;
+        
+        if mode == old_mode { return; }
+        
+        if mode == 0 {
+            // 恢复材质可见性
+            if !self.hand_mode_visible_backup.is_empty() {
+                self.material_visible = self.hand_mode_visible_backup.clone();
+                self.hand_mode_visible_backup.clear();
+            }
+        } else {
+            // 备份并切换到手部模式
+            if self.hand_mode_visible_backup.is_empty() {
+                self.hand_mode_visible_backup = self.material_visible.clone();
+            }
+            
+            // 收集目标手的材质 ID
+            let mut hand_mat_ids = std::collections::HashSet::new();
+            for (i, &flag) in self.hand_submesh_flags.iter().enumerate() {
+                if flag == mode {
+                    if i < self.submeshes.len() {
+                        hand_mat_ids.insert(self.submeshes[i].material_id as usize);
+                    }
+                }
+            }
+            
+            // 隐藏所有材质，仅显示目标手的材质
+            for (i, vis) in self.material_visible.iter_mut().enumerate() {
+                *vis = hand_mat_ids.contains(&i);
+            }
         }
     }
     

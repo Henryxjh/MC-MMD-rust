@@ -110,7 +110,6 @@ public abstract class ToonShaderBase {
             onInitialized();
             
             initialized = true;
-            logger.info("{} 初始化成功", getShaderName());
             return true;
             
         } catch (Exception e) {

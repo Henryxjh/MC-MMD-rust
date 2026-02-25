@@ -31,9 +31,7 @@ public class ShaderProvider {
             String fragSource = Files.readString(fragFile.toPath());
 
             program = ShaderCompiler.compileRenderProgram(vertexSource, fragSource, "MMDShader");
-            if (program > 0) {
-                logger.info("MMD Shader 初始化完成");
-            } else {
+            if (program <= 0) {
                 logger.error("MMD Shader 编译/链接失败");
             }
         } catch (IOException e) {

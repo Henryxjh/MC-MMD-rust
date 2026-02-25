@@ -86,8 +86,6 @@ public class MorphWheelScreen extends AbstractWheelScreen {
         
         // 添加"重置表情"选项
         morphSlots.add(new MorphSlot(Component.translatable("gui.mmdskin.reset_morph").getString(), "__reset__", null));
-        
-        logger.info("表情轮盘: 加载 {} 个槽位", morphSlots.size());
     }
     
     private String getMorphFilePath(MorphWheelConfig.MorphEntry entry) {
@@ -188,8 +186,6 @@ public class MorphWheelScreen extends AbstractWheelScreen {
     }
     
     private void executeMorph(MorphSlot slot) {
-        logger.info("执行表情: {}", slot.displayName);
-        
         // 获取当前玩家的模型
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
@@ -216,7 +212,6 @@ public class MorphWheelScreen extends AbstractWheelScreen {
         if ("__reset__".equals(slot.morphName)) {
             // 重置所有表情
             nf.ResetAllMorphs(modelHandle);
-            logger.info("已重置所有表情");
         } else {
             // 应用 VPD 表情/姿势
             if (slot.filePath != null) {
@@ -225,7 +220,6 @@ public class MorphWheelScreen extends AbstractWheelScreen {
                     // 解码返回值: 高16位为骨骼数，低16位为 Morph 数
                     int boneCount = (result >> 16) & 0xFFFF;
                     int morphCount = result & 0xFFFF;
-                    logger.info("应用表情成功: {}, 匹配 {} 个 Morph, {} 个 Bone", slot.filePath, morphCount, boneCount);
                 } else if (result == -1) {
                     logger.error("VPD 文件加载失败: {}", slot.filePath);
                 } else if (result == -2) {

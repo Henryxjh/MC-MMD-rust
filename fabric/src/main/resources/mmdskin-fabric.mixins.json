@@ -14,6 +14,7 @@
     "ItemInHandRendererMixin",
     "MinecraftMixin",
     "MouseHandlerMixin",
+    "KeyboardInputMixin",
     "EntityMixin"
   ],
   "injectors": {

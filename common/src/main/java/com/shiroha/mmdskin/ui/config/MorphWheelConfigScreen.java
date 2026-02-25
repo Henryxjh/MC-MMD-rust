@@ -104,7 +104,6 @@ public class MorphWheelConfigScreen extends Screen {
         loadData();
         this.clearWidgets();
         this.init();
-        logger.info("表情列表已刷新");
     }
     
     private void selectAll() {
@@ -133,7 +132,6 @@ public class MorphWheelConfigScreen extends Screen {
         MorphWheelConfig config = MorphWheelConfig.getInstance();
         config.setDisplayedMorphs(selectedMorphs);
         config.save();
-        logger.info("已保存 {} 个表情到轮盘", selectedMorphs.size());
         this.onClose();
     }
 

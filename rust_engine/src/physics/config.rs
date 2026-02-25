@@ -25,6 +25,8 @@ pub struct PhysicsConfig {
     pub max_angular_velocity: f32,
     /// 是否启用关节
     pub joints_enabled: bool,
+    /// 运动学-动态碰撞过滤（解决头发穿透胸部抖动）
+    pub kinematic_filter: bool,
     /// 调试日志
     pub debug_log: bool,
 }
@@ -40,6 +42,7 @@ impl Default for PhysicsConfig {
             max_linear_velocity: 20.0,
             max_angular_velocity: 20.0,
             joints_enabled: true,
+            kinematic_filter: true,
             debug_log: false,
         }
     }

@@ -102,8 +102,6 @@ public class ModelInfo {
         // 按文件夹名称排序
         models.sort((a, b) -> a.getFolderName().compareToIgnoreCase(b.getFolderName()));
         
-        logger.info("共扫描到 {} 个模型", models.size());
-        
         // 原子更新缓存（单次 volatile 写入）
         cache = new CacheSnapshot(models, System.currentTimeMillis());
         

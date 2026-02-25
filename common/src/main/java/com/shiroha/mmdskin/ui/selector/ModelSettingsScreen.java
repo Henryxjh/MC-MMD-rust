@@ -114,7 +114,6 @@ public class ModelSettingsScreen extends Screen {
     private void saveAndClose() {
         ModelConfigManager.saveConfig(modelName, config);
         applyConfigToModel();
-        logger.info("模型 {} 配置已保存", modelName);
         this.onClose();
     }
     
@@ -123,7 +122,6 @@ public class ModelSettingsScreen extends Screen {
      */
     private void resetDefaults() {
         config = new ModelConfigData();
-        logger.info("模型 {} 配置已重置", modelName);
     }
     
     /**
@@ -491,11 +489,9 @@ public class ModelSettingsScreen extends Screen {
         if (modelName.equals(currentBound)) {
             // 取消绑定
             selectorConfig.setQuickSlotModel(slot, null);
-            logger.info("取消快捷槽位 {} 绑定", slot + 1);
         } else {
             // 绑定到此槽位
             selectorConfig.setQuickSlotModel(slot, modelName);
-            logger.info("模型 {} 绑定到快捷槽位 {}", modelName, slot + 1);
         }
     }
     

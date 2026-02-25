@@ -46,12 +46,8 @@ public class RenderModeManager {
         }
         
         factories.add(factory);
-        // CPU_SKINNING 默认启用（基础回退），其余默认禁用
         enabledStates.putIfAbsent(factory.getCategory(), 
             factory.getCategory() == RenderCategory.CPU_SKINNING);
-        
-        logger.info("注册渲染工厂: {} (分类: {}, 优先级: {}, 可用: {})", 
-            factory.getModeName(), factory.getCategory(), factory.getPriority(), factory.isAvailable());
     }
     
     /**
@@ -70,8 +66,6 @@ public class RenderModeManager {
         
         syncFactoryStates();
         initialized = true;
-        logger.info("RenderModeManager 初始化完成 (已注册 {} 个工厂)", factories.size());
-        logger.info("当前渲染模式: {}", getCurrentModeDescription());
     }
     
     /**
@@ -95,7 +89,6 @@ public class RenderModeManager {
      */
     public static void setEnabled(RenderCategory category, boolean enabled) {
         enabledStates.put(category, enabled);
-        logger.info("渲染分类 {} : {}", category, enabled ? "启用" : "禁用");
     }
     
     public static void setUseGpuSkinning(boolean enabled) {
@@ -200,7 +193,6 @@ public class RenderModeManager {
     private static IMMDModel tryCreateWithFactories(List<IMMDModelFactory> candidates,
             String modelFilename, String modelDir, boolean isPMD, long layerCount) {
         for (IMMDModelFactory factory : candidates) {
-            logger.info("尝试使用 {} 创建模型: {}", factory.getModeName(), modelFilename);
             try {
                 IMMDModel model = factory.createModel(modelFilename, modelDir, isPMD, layerCount);
                 if (model != null) return model;
@@ -215,7 +207,6 @@ public class RenderModeManager {
     private static IMMDModel tryCreateFromHandle(List<IMMDModelFactory> candidates,
             long modelHandle, String modelDir) {
         for (IMMDModelFactory factory : candidates) {
-            logger.info("尝试使用 {} 从句柄创建模型", factory.getModeName());
             try {
                 IMMDModel model = factory.createModelFromHandle(modelHandle, modelDir);
                 if (model != null) return model;

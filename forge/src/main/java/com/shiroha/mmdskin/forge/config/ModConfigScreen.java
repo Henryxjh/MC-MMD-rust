@@ -342,6 +342,16 @@ public class ModConfigScreen {
             .setSaveConsumer(value -> data.physicsJointsEnabled = value)
             .build());
         
+        // 碰撞过滤
+        physicsCategory.addEntry(entryBuilder
+            .startBooleanToggle(
+                Component.translatable("gui.mmdskin.mod_settings.physics_kinematic_filter"),
+                data.physicsKinematicFilter)
+            .setDefaultValue(true)
+            .setTooltip(Component.translatable("gui.mmdskin.mod_settings.physics_kinematic_filter.tooltip"))
+            .setSaveConsumer(value -> data.physicsKinematicFilter = value)
+            .build());
+        
         // 调试日志
         physicsCategory.addEntry(entryBuilder
             .startBooleanToggle(
@@ -352,6 +362,29 @@ public class ModConfigScreen {
             .setSaveConsumer(value -> data.physicsDebugLog = value)
             .build());
         
+        // ==================== VR 联动设置 ====================
+        ConfigCategory vrCategory = builder.getOrCreateCategory(
+            Component.translatable("gui.mmdskin.mod_settings.category.vr"));
+
+        vrCategory.addEntry(entryBuilder
+            .startBooleanToggle(
+                Component.translatable("gui.mmdskin.mod_settings.vr_enabled"),
+                data.vrEnabled)
+            .setDefaultValue(true)
+            .setTooltip(Component.translatable("gui.mmdskin.mod_settings.vr_enabled.tooltip"))
+            .setSaveConsumer(value -> data.vrEnabled = value)
+            .build());
+
+        vrCategory.addEntry(entryBuilder
+            .startIntSlider(
+                Component.translatable("gui.mmdskin.mod_settings.vr_arm_ik_strength"),
+                (int)(data.vrArmIKStrength * 100), 0, 100)
+            .setDefaultValue(100)
+            .setTooltip(Component.translatable("gui.mmdskin.mod_settings.vr_arm_ik_strength.tooltip"))
+            .setTextGetter(value -> Component.literal(value + "%"))
+            .setSaveConsumer(value -> data.vrArmIKStrength = value / 100.0f)
+            .build());
+
         // ==================== 调试设置分类 ====================
         ConfigCategory debugCategory = builder.getOrCreateCategory(
             Component.translatable("gui.mmdskin.mod_settings.category.debug"));
@@ -382,6 +415,7 @@ public class ModConfigScreen {
                     data.physicsMaxLinearVelocity,
                     data.physicsMaxAngularVelocity,
                     data.physicsJointsEnabled,
+                    data.physicsKinematicFilter,
                     data.physicsDebugLog
                 );
             } catch (UnsatisfiedLinkError e) {

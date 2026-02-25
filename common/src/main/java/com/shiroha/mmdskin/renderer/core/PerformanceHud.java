@@ -88,7 +88,7 @@ public class PerformanceHud {
         cachedLines.clear();
         
         // ===== 系统资源 =====
-        addLine("\u25b6 \u7cfb\u7edf\u8d44\u6e90", TITLE_COLOR);
+        addLine("▶ 系统资源", TITLE_COLOR);
         
         Runtime rt = Runtime.getRuntime();
         long jvmUsed = rt.totalMemory() - rt.freeMemory();
@@ -100,14 +100,14 @@ public class PerformanceHud {
             long gpuUsed = gpuTotalVram - gpuAvail;
             addLine(String.format("  GPU   %s / %s", fmtB(gpuUsed), fmtB(gpuTotalVram)), VALUE_COLOR);
         } else if (gpuAvail > 0) {
-            addLine(String.format("  GPU   \u53ef\u7528 %s", fmtB(gpuAvail)), VALUE_COLOR);
+            addLine(String.format("  GPU   可用 %s", fmtB(gpuAvail)), VALUE_COLOR);
         } else {
             addLine("  GPU   N/A", LABEL_COLOR);
         }
         
         // ===== MMD 资源 =====
         addLine("", VALUE_COLOR); // 空行分隔
-        addLine("\u25b6 MMD \u8d44\u6e90", TITLE_COLOR);
+        addLine("▶ MMD 资源", TITLE_COLOR);
         
         List<MMDModelManager.Model> models = MMDModelManager.getLoadedModels();
         int curModels = models.size();
@@ -117,17 +117,17 @@ public class PerformanceHud {
         
         int modelPending = MMDModelManager.getCachePendingReleaseCount();
         if (modelPending > 0) {
-            addLine(String.format("  \u6a21\u578b   \u5f53\u524d %d  \u5f85\u91ca\u653e %d  \u7d2f\u8ba1 %d", curModels, modelPending, totalLoaded), VALUE_COLOR);
+            addLine(String.format("  模型   当前 %d  待释放 %d  累计 %d", curModels, modelPending, totalLoaded), VALUE_COLOR);
         } else {
-            addLine(String.format("  \u6a21\u578b   \u5f53\u524d %d  \u7d2f\u8ba1 %d", curModels, totalLoaded), VALUE_COLOR);
+            addLine(String.format("  模型   当前 %d  累计 %d", curModels, totalLoaded), VALUE_COLOR);
         }
         int pendingCount = MMDTextureManager.getPendingReleaseCount();
         long pendingVram = MMDTextureManager.getPendingReleaseVram();
         if (pendingCount > 0) {
-            addLine(String.format("  \u7eb9\u7406   %d \u5f20  VRAM %s (待释放 %d \u5f20 %s)",
+            addLine(String.format("  纹理   %d 张  VRAM %s (待释放 %d 张 %s)",
                     texCount, fmtB(texVram), pendingCount, fmtB(pendingVram)), VALUE_COLOR);
         } else {
-            addLine(String.format("  \u7eb9\u7406   %d \u5f20  VRAM %s", texCount, fmtB(texVram)), VALUE_COLOR);
+            addLine(String.format("  纹理   %d 张  VRAM %s", texCount, fmtB(texVram)), VALUE_COLOR);
         }
         
         // 汇总 RAM/VRAM
@@ -139,14 +139,14 @@ public class PerformanceHud {
         long totalMmdVram = totalVram + texVram;
         
         addLine(String.format("  RAM    %s", fmtB(totalRam)), VALUE_COLOR);
-        addLine(String.format("  VRAM   %s (\u6a21\u578b %s + \u7eb9\u7406 %s)",
+        addLine(String.format("  VRAM   %s (模型 %s + 纹理 %s)",
                 fmtB(totalMmdVram), fmtB(totalVram), fmtB(texVram)), VALUE_COLOR);
         
         // ===== 模型详情 =====
         if (!models.isEmpty()) {
             NativeFunc nf = NativeFunc.GetInst();
             addLine("", VALUE_COLOR);
-            addLine("\u25b6 \u6a21\u578b\u8be6\u60c5", TITLE_COLOR);
+            addLine("▶ 模型详情", TITLE_COLOR);
             for (MMDModelManager.Model m : models) {
                 IMMDModel model = m.model;
                 long handle = model.getModelHandle();
@@ -154,7 +154,7 @@ public class PerformanceHud {
                 
                 String name = model.getModelName();
                 if (name.length() > 24) name = name.substring(0, 22) + "..";
-                addLine("  \u25cb " + name, VALUE_COLOR);
+                addLine("  ○ " + name, VALUE_COLOR);
                 
                 // 内存占用
                 long ram = model.getRamUsage();
@@ -172,10 +172,10 @@ public class PerformanceHud {
                 long faceCount = idxCount / 3;
                 // 面数超过 10 万用橙色警告
                 int faceColor = faceCount > 100_000 ? WARN_COLOR : LABEL_COLOR;
-                addLine(String.format("    \u9762 %s  \u9876\u70b9 %s  \u9aa8\u9abc %d  \u6750\u8d28 %d",
+                addLine(String.format("    面 %s  顶点 %s  骨骼 %d  材质 %d",
                         fmtNum(faceCount), fmtNum(vtxCount), boneCount, matCount), faceColor);
                 if (vMorphs > 0 || uvMorphs > 0) {
-                    addLine(String.format("    Morph: \u9876\u70b9 %d  UV %d", vMorphs, uvMorphs), LABEL_COLOR);
+                    addLine(String.format("    Morph: 顶点 %d  UV %d", vMorphs, uvMorphs), LABEL_COLOR);
                 }
             }
         }

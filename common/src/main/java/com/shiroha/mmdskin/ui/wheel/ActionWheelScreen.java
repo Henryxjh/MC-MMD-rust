@@ -141,7 +141,6 @@ public class ActionWheelScreen extends AbstractWheelScreen {
         if (mc.player != null) {
             MmdSkinRendererPlayerHelper.CustomAnim(mc.player, slot.animId);
             ActionWheelNetworkHandler.sendActionToServer(slot.animId);
-            logger.info("执行动作: {} ({})", slot.name, slot.animId);
         }
     }
 
