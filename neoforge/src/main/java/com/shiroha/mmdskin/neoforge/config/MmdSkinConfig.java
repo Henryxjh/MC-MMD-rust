@@ -208,4 +208,9 @@ public final class MmdSkinConfig implements ConfigManager.IConfigProvider {
     public boolean isDebugHudEnabled() {
         return data.debugHudEnabled;
     }
+    
+    @Override
+    public int getTextureCacheBudgetMB() {
+        return data.textureCacheBudgetMB;
+    }
 }

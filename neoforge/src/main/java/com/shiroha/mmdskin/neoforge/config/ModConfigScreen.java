@@ -359,6 +359,16 @@ public class ModConfigScreen {
             .setSaveConsumer(value -> data.physicsDebugLog = value)
             .build());
         
+        performanceCategory.addEntry(entryBuilder
+            .startIntSlider(
+                Component.translatable("gui.mmdskin.mod_settings.texture_cache_budget"),
+                data.textureCacheBudgetMB, 64, 1024)
+            .setDefaultValue(256)
+            .setTooltip(Component.translatable("gui.mmdskin.mod_settings.texture_cache_budget.tooltip"))
+            .setTextGetter(value -> Component.literal(value + " MB"))
+            .setSaveConsumer(value -> data.textureCacheBudgetMB = value)
+            .build());
+        
         // ==================== 调试设置分类 ====================
         ConfigCategory debugCategory = builder.getOrCreateCategory(
             Component.translatable("gui.mmdskin.mod_settings.category.debug"));
