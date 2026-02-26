@@ -11,6 +11,7 @@ import com.shiroha.mmdskin.renderer.render.MmdSkinRenderFactory;
 import com.shiroha.mmdskin.ui.network.ActionWheelNetworkHandler;
 import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
+import com.shiroha.mmdskin.ui.QuickModelSwitcher;
 import com.shiroha.mmdskin.ui.network.MorphWheelNetworkHandler;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import com.shiroha.mmdskin.ui.network.StageNetworkHandler;
@@ -55,6 +56,14 @@ public class MmdSkinRegisterClient {
     static KeyMapping keyMaidConfigWheel = new KeyMapping("key.mmdskin.maid_config_wheel",
         InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_B, "key.categories.mmdskin");
     
+    static final KeyMapping[] keyQuickModels = new KeyMapping[4];
+    static {
+        for (int i = 0; i < 4; i++) {
+            keyQuickModels[i] = new KeyMapping("key.mmdskin.quick_model_" + (i + 1),
+                InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), "key.categories.mmdskin");
+        }
+    }
+    
     // 追踪按键状态
     private static boolean configWheelKeyWasDown = false;
     private static boolean maidConfigWheelKeyWasDown = false;
@@ -69,6 +78,9 @@ public class MmdSkinRegisterClient {
         KeyBindingHelper.registerKeyBinding(keyConfigWheel);
         if (MaidCompatMixinPlugin.isMaidModLoaded()) {
             KeyBindingHelper.registerKeyBinding(keyMaidConfigWheel);
+        }
+        for (KeyMapping keyQuickModel : keyQuickModels) {
+            KeyBindingHelper.registerKeyBinding(keyQuickModel);
         }
         
         // 设置模组设置界面工厂
@@ -165,6 +177,15 @@ public class MmdSkinRegisterClient {
                     maidConfigWheelKeyWasDown = keyDown;
                 } else {
                     maidConfigWheelKeyWasDown = false;
+                }
+            }
+
+            // 快捷模型切换
+            if (MCinstance.screen == null) {
+                for (int i = 0; i < keyQuickModels.length; i++) {
+                    while (keyQuickModels[i].consumeClick()) {
+                        QuickModelSwitcher.switchToSlot(i);
+                    }
                 }
             }
 

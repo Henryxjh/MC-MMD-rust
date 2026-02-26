@@ -11,6 +11,7 @@ import com.shiroha.mmdskin.ui.network.MorphWheelNetworkHandler;
 import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
 import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
+import com.shiroha.mmdskin.ui.QuickModelSwitcher;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import com.shiroha.mmdskin.ui.network.StageNetworkHandler;
 import com.shiroha.mmdskin.renderer.camera.StageAudioPlayer;
@@ -70,6 +71,19 @@ public class MmdSkinRegisterClient {
         GLFW.GLFW_KEY_B, 
         "key.categories.mmdskin"
     );
+    
+    public static final KeyMapping[] keyQuickModels = new KeyMapping[4];
+    static {
+        for (int i = 0; i < 4; i++) {
+            keyQuickModels[i] = new KeyMapping(
+                "key.mmdskin.quick_model_" + (i + 1),
+                KeyConflictContext.IN_GAME,
+                InputConstants.Type.KEYSYM,
+                InputConstants.UNKNOWN.getValue(),
+                "key.categories.mmdskin"
+            );
+        }
+    }
     
     // 追踪按键状态
     private static boolean configWheelKeyWasDown = false;
@@ -176,6 +190,9 @@ public class MmdSkinRegisterClient {
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(keyConfigWheel);
         event.register(keyMaidConfigWheel);
+        for (KeyMapping keyQuickModel : keyQuickModels) {
+            event.register(keyQuickModel);
+        }
         logger.info("按键映射注册完成");
     }
     
@@ -244,6 +261,15 @@ public class MmdSkinRegisterClient {
                 maidConfigWheelKeyWasDown = keyDown;
             } else {
                 maidConfigWheelKeyWasDown = false;
+            }
+
+            // 快捷模型切换
+            if (mc.screen == null) {
+                for (int i = 0; i < keyQuickModels.length; i++) {
+                    while (keyQuickModels[i].consumeClick()) {
+                        QuickModelSwitcher.switchToSlot(i);
+                    }
+                }
             }
 
             // 远程舞台音频距离衰减（每秒更新一次）
