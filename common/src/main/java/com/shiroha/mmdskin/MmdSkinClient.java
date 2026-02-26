@@ -28,7 +28,7 @@ public class MmdSkinClient {
     static final int BUFFER = 512;
     static final long TOOBIG = 0x6400000; // Max size of unzipped data, 100MB
     static final int TOOMANY = 1024;      // Max number of files
-    //public static String[] debugStr = new String[10];
+
 
     public static void initClient() {
         check3DSkinFolder();
@@ -114,27 +114,24 @@ public class MmdSkinClient {
         if (canonicalPath.startsWith(canonicalID)) {
             return canonicalPath;
         } else {
-            throw new IllegalStateException("File is outside extraction target directory.");
+            throw new IllegalStateException("文件在目标解压目录之外");
         }
     }
 
     public static final void unzip(String filename, String targetDir) throws java.io.IOException {
-        FileInputStream fis = new FileInputStream(filename);
-        ZipInputStream zis = new ZipInputStream(new BufferedInputStream(fis));
         ZipEntry entry;
         int entries = 0;
         long total = 0;
-        try {
+        try (FileInputStream fis = new FileInputStream(filename);
+             ZipInputStream zis = new ZipInputStream(new BufferedInputStream(fis))) {
             while ((entry = zis.getNextEntry()) != null) {
-                logger.info("Extracting: " + entry);
+                logger.info("解压: " + entry);
                 int count;
                 byte data[] = new byte[BUFFER];
-                // Write the files to the disk, but ensure that the filename is valid,
-                // and that the file is not insanely big
                 String name = validateFilename(targetDir+entry.getName(), targetDir);
                 File targetFile = new File(name);
                 if (entry.isDirectory()) {
-                    logger.info("Creating directory " + name);
+                    logger.info("创建目录 " + name);
                     new File(name).mkdir();
                     continue;
                 }
@@ -152,21 +149,19 @@ public class MmdSkinClient {
                 zis.closeEntry();
                 entries++;
                 if (entries > TOOMANY) {
-                    throw new IllegalStateException("Too many files to unzip.");
+                    throw new IllegalStateException("解压文件数量过多");
                 }
                 if (total + BUFFER > TOOBIG) {
-                    throw new IllegalStateException("File being unzipped is too big.");
+                    throw new IllegalStateException("解压文件体积过大");
                 }
             }
-        } finally {
-            zis.close();
         }
     }
 
     private static void check3DSkinFolder(){
         File skin3DFolder = PathConstants.getSkinRootDir();
         if (!skin3DFolder.exists()){
-            logger.info("3d-skin folder not found, try download from github!");
+            logger.info("3d-skin 目录不存在，尝试从 GitHub 下载");
             skin3DFolder.mkdir();
             String gameDir = PathConstants.getGameDirectory();
             File zipFile = new File(gameDir, PathConstants.RESOURCE_ZIP_NAME);
@@ -177,7 +172,7 @@ public class MmdSkinClient {
                     zipFile, 30000, 30000);
                 downloadSuccess = true;
             }catch (IOException e){
-                logger.error("Download 3d-skin.zip failed: {}", e.getMessage());
+                logger.error("下载 3d-skin.zip 失败: {}", e.getMessage());
             }
 
             if (downloadSuccess) {
@@ -185,7 +180,7 @@ public class MmdSkinClient {
                     unzip(zipFile.getAbsolutePath(), 
                           PathConstants.getSkinRootPath() + "/");
                 }catch (IOException e){
-                    logger.error("extract 3d-skin.zip failed: {}", e.getMessage());
+                    logger.error("解压 3d-skin.zip 失败: {}", e.getMessage());
                 }
             }
 

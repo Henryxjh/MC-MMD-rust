@@ -138,7 +138,6 @@ public class MMDModelOpenGL extends AbstractMMDModel {
         MMDMaterial lightMapMaterial = null;
         FloatBuffer modelViewMatBuff = null, projMatBuff = null;
         FloatBuffer light0Buff = null, light1Buff = null;
-        FloatBuffer matMorphResultsBuf = null;
         ByteBuffer matMorphResultsByteBuf = null;
         
         try {
@@ -299,10 +298,8 @@ public class MMDModelOpenGL extends AbstractMMDModel {
             if (matMorphCount > 0) {
                 int floatCount = matMorphCount * 56;
                 result.materialMorphResultCount = matMorphCount;
-                matMorphResultsBuf = MemoryUtil.memAllocFloat(floatCount);
                 matMorphResultsByteBuf = MemoryUtil.memAlloc(floatCount * 4);
                 matMorphResultsByteBuf.order(ByteOrder.LITTLE_ENDIAN);
-                result.materialMorphResultsBuffer = matMorphResultsBuf;
                 result.materialMorphResultsByteBuffer = matMorphResultsByteBuf;
             }
             
@@ -333,7 +330,6 @@ public class MMDModelOpenGL extends AbstractMMDModel {
             if (projMatBuff != null) MemoryUtil.memFree(projMatBuff);
             if (light0Buff != null) MemoryUtil.memFree(light0Buff);
             if (light1Buff != null) MemoryUtil.memFree(light1Buff);
-            if (matMorphResultsBuf != null) MemoryUtil.memFree(matMorphResultsBuf);
             if (matMorphResultsByteBuf != null) MemoryUtil.memFree(matMorphResultsByteBuf);
             
             return null;
