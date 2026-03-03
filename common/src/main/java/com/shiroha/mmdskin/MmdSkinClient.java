@@ -1,10 +1,9 @@
 package com.shiroha.mmdskin;
 
 import com.shiroha.mmdskin.config.PathConstants;
+import com.shiroha.mmdskin.renderer.animation.MMDAnimManager;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import com.shiroha.mmdskin.renderer.resource.MMDTextureManager;
-import com.shiroha.mmdskin.renderer.animation.FbxDefaultAnimPack;
-import com.shiroha.mmdskin.renderer.animation.MMDAnimManager;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -36,7 +35,6 @@ public class MmdSkinClient {
         MMDModelManager.Init();
         MMDTextureManager.Init();
         MMDAnimManager.Init();
-        FbxDefaultAnimPack.init();
         
         ensureEntityPlayerDirectory();
     }
@@ -55,8 +53,7 @@ public class MmdSkinClient {
         "itemActive_minecraft.shield_Left_using.vmd", "itemActive_minecraft.shield_Right_using.vmd",
         "lieDown.vmd", "onClimbable.vmd", "onClimbableDown.vmd", "onClimbableUp.vmd",
         "onHorse.vmd", "ride.vmd", "sleep.vmd", "sneak.vmd",
-        "sprint.vmd", "swim.vmd", "swingLeft.vmd", "swingRight.vmd", "walk.vmd",
-        "UAL1.fbx"
+        "sprint.vmd", "swim.vmd", "swingLeft.vmd", "swingRight.vmd", "walk.vmd"
     };
     
     private static void extractDefaultAnimIfNeeded() {
