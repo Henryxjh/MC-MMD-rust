@@ -15,16 +15,7 @@ import org.apache.logging.log4j.Logger;
 import net.minecraft.network.chat.Component;
 import org.joml.Vector3f;
 
-/**
- * MMD 舞台模式相机控制器（单例）
- *
- * 状态机：
- *   INACTIVE ──enterStageMode()──> INTRO ──过渡完成──> STANDBY
- *   STANDBY  ──startStage()────> PLAYING
- *   PLAYING  ──播放完/ESC──────> OUTRO ──过渡完成──> STANDBY
- *   STANDBY  ──ESC/exitStageMode()──> INACTIVE
- *   WATCHING ──被邀请者观看房主舞台（播放中的相机跟随）
- */
+/** MMD 舞台模式相机控制器（单例） */
 public class MMDCameraController {
     private static final Logger logger = LogManager.getLogger();
 
@@ -92,6 +83,8 @@ public class MMDCameraController {
     private boolean outroIsGuest = false;
 
     private volatile boolean waitingForHost = false;
+    
+
 
     private MMDCameraController() {}
 
@@ -118,10 +111,6 @@ public class MMDCameraController {
             mc.player.yBodyRot = this.anchorYaw;
         }
 
-        if (mc.player != null) {
-            MMDModelManager.forceReloadPlayerModels(mc.player.getName().getString());
-        }
-
         computeIntroAndStandby(mc);
 
         this.introElapsed = 0.0f;
@@ -129,10 +118,17 @@ public class MMDCameraController {
         this.escWasPressed = false;
         this.lastEscTimeNs = 0;
         this.mouseReleased = false;
-        this.waitingForHost = false;
+        
+        com.shiroha.mmdskin.ui.stage.StageInviteManager mgr = 
+            com.shiroha.mmdskin.ui.stage.StageInviteManager.getInstance();
+        if (mgr.getWatchingHostUUID() == null) {
+            this.waitingForHost = false;
+        }
+        
         this.state = StageState.INTRO;
         this.cameraFov = introStartFov;
     }
+
 
     public boolean startStage(long motionAnim, long cameraAnim, boolean cinematic,
                               long modelHandle, String modelName, String audioPath, float heightOffset) {
@@ -142,21 +138,31 @@ public class MMDCameraController {
 
         this.motionAnimHandle = motionAnim;
 
+        // 修复：无相机数据时不再 return，改为设置 cameraAnimHandle = 0 并继续执行
+        // 这样可以继续播放音频，只是相机视角保持不变
+        boolean hasCameraData = false;
         if (cameraAnim != 0 && nf.HasCameraData(cameraAnim)) {
             this.cameraAnimHandle = cameraAnim;
+            hasCameraData = true;
         } else if (motionAnim != 0 && nf.HasCameraData(motionAnim)) {
             this.cameraAnimHandle = motionAnim;
+            hasCameraData = true;
         } else {
-            logger.warn("[舞台模式] 没有可用的相机数据");
-            return false;
+            // 无相机数据：记录警告但不 return，继续执行（音频仍会播放）
+            logger.warn("[舞台模式] 没有可用的相机数据，将以无相机模式继续");
+            this.cameraAnimHandle = 0;
         }
 
-        this.maxFrame = nf.GetAnimMaxFrame(this.cameraAnimHandle);
-        this.currentFrame = 0.0f;
-        this.cinematicMode = cinematic;
-        this.cameraHeightOffset = heightOffset;
-        this.modelName = modelName;
-        this.cameraData.setAnimHandle(this.cameraAnimHandle);
+        // 修复：无相机数据时使用动作动画的帧数作为最大帧
+        if (hasCameraData) {
+            this.maxFrame = nf.GetAnimMaxFrame(this.cameraAnimHandle);
+            this.cameraData.setAnimHandle(this.cameraAnimHandle);
+        } else if (motionAnim != 0) {
+            // 无相机但有动作时，使用动作帧数
+            this.maxFrame = nf.GetAnimMaxFrame(motionAnim);
+        } else {
+            this.maxFrame = 0;
+        }
 
         if (cinematic) {
             Minecraft mc = Minecraft.getInstance();
@@ -200,16 +206,7 @@ public class MMDCameraController {
         NativeFunc nf = NativeFunc.GetInst();
 
         clearLocalPlayerStageFlags();
-
-        if (this.modelName != null && !this.modelName.isEmpty()) {
-            Minecraft mcEnd = Minecraft.getInstance();
-            if (mcEnd.player != null) {
-                MMDModelManager.forceReloadPlayerModels(mcEnd.player.getName().getString());
-            }
-        } else if (this.modelHandle != 0) {
-            nf.SetAutoBlinkEnabled(this.modelHandle, true);
-            nf.SetEyeTrackingEnabled(this.modelHandle, true);
-        }
+        restoreModelState(nf);
 
         if (this.motionAnimHandle != 0) {
             nf.DeleteAnimation(this.motionAnimHandle);
@@ -268,16 +265,7 @@ public class MMDCameraController {
             NativeFunc nf = NativeFunc.GetInst();
 
             clearLocalPlayerStageFlags();
-
-            if (this.modelName != null && !this.modelName.isEmpty()) {
-                Minecraft mcExit = Minecraft.getInstance();
-                if (mcExit.player != null) {
-                    MMDModelManager.forceReloadPlayerModels(mcExit.player.getName().getString());
-                }
-            } else if (this.modelHandle != 0) {
-                nf.SetAutoBlinkEnabled(this.modelHandle, true);
-                nf.SetEyeTrackingEnabled(this.modelHandle, true);
-            }
+            restoreModelState(nf);
             if (this.motionAnimHandle != 0) {
                 nf.DeleteAnimation(this.motionAnimHandle);
             }
@@ -311,7 +299,8 @@ public class MMDCameraController {
                 if (mc.player != null) {
                     StageAnimSyncHelper.endStageAnim(mc.player);
                 }
-                mgr.stopWatching();
+                this.waitingForHost = true;
+                mc.setScreen(new com.shiroha.mmdskin.ui.stage.StageSelectScreen());
             } else {
                 mgr.notifyMembersStageEnd();
                 mgr.resetHostState();
@@ -423,8 +412,9 @@ public class MMDCameraController {
             return;
         }
 
-        // 只有房主广播帧同步，被邀请者不发送
         if (!com.shiroha.mmdskin.ui.stage.StageInviteManager.getInstance().isWatchingStage()) {
+            com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper.syncAllRemoteStageFrame(currentFrame);
+            com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper.syncLocalStageFrame(currentFrame);
             frameSyncCounter++;
             if (frameSyncCounter >= SYNC_INTERVAL_FRAMES) {
                 frameSyncCounter = 0;
@@ -432,24 +422,27 @@ public class MMDCameraController {
             }
         }
 
-        cameraData.update(currentFrame);
+        // 修复：无相机数据时不更新相机位置，保持玩家当前视角
+        if (cameraAnimHandle != 0) {
+            cameraData.update(currentFrame);
 
-        Vector3f mmdPos = cameraData.getPosition();
-        float sx = mmdPos.x * MMD_TO_MC_SCALE;
-        float sy = mmdPos.y * MMD_TO_MC_SCALE;
-        float sz = mmdPos.z * MMD_TO_MC_SCALE;
+            Vector3f mmdPos = cameraData.getPosition();
+            float sx = mmdPos.x * MMD_TO_MC_SCALE;
+            float sy = mmdPos.y * MMD_TO_MC_SCALE;
+            float sz = mmdPos.z * MMD_TO_MC_SCALE;
 
-        float yawRad = (float) Math.toRadians(anchorYaw);
-        float cos = (float) Math.cos(yawRad);
-        float sin = (float) Math.sin(yawRad);
-        cameraX = anchorX + sx * cos - sz * sin;
-        cameraY = anchorY + sy + cameraHeightOffset;
-        cameraZ = anchorZ + sx * sin + sz * cos;
+            float yawRad = (float) Math.toRadians(anchorYaw);
+            float cos = (float) Math.cos(yawRad);
+            float sin = (float) Math.sin(yawRad);
+            cameraX = anchorX + sx * cos - sz * sin;
+            cameraY = anchorY + sy + cameraHeightOffset;
+            cameraZ = anchorZ + sx * sin + sz * cos;
 
-        cameraPitch = (float) Math.toDegrees(cameraData.getPitch());
-        cameraYaw = (float) Math.toDegrees(cameraData.getYaw()) + anchorYaw;
-        cameraRoll = (float) Math.toDegrees(cameraData.getRoll());
-        cameraFov = cameraData.getFov();
+            cameraPitch = (float) Math.toDegrees(cameraData.getPitch());
+            cameraYaw = (float) Math.toDegrees(cameraData.getYaw()) + anchorYaw;
+            cameraRoll = (float) Math.toDegrees(cameraData.getRoll());
+            cameraFov = cameraData.getFov();
+        }
     }
 
     private void updateOutro() {
@@ -477,18 +470,8 @@ public class MMDCameraController {
             cameraYaw = standbyYaw;
             cameraFov = standbyFov;
 
-            if (outroIsGuest) {
-                state = StageState.INACTIVE;
-                Minecraft mc = Minecraft.getInstance();
-                if (savedCameraType != null) {
-                    mc.options.setCameraType(savedCameraType);
-                    savedCameraType = null;
-                }
-                KeyMapping.releaseAll();
-            } else {
-                state = StageState.STANDBY;
-                Minecraft.getInstance().setScreen(new StageSelectScreen());
-            }
+            state = StageState.STANDBY;
+            Minecraft.getInstance().setScreen(new StageSelectScreen());
         }
     }
 
@@ -565,6 +548,22 @@ public class MMDCameraController {
         if (resolved != null) {
             resolved.model().entityData.playCustomAnim = false;
             resolved.model().entityData.playStageAnim = false;
+        }
+    }
+
+    private void restoreModelState(NativeFunc nf) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+        PlayerModelResolver.Result resolved = PlayerModelResolver.resolve(mc.player);
+        if (resolved != null) {
+            MMDModelManager.Model mwed = resolved.model();
+            long handle = mwed.model.getModelHandle();
+            if (handle != 0) {
+                nf.SetAutoBlinkEnabled(handle, true);
+                nf.SetEyeTrackingEnabled(handle, true);
+            }
+            mwed.model.resetPhysics();
+            mwed.entityData.invalidateStateLayers();
         }
     }
 
@@ -654,6 +653,7 @@ public class MMDCameraController {
         this.waitingForHost = waiting;
     }
 
+
     public java.util.UUID getWatchingHostUUID() {
         return watchingHostUUID;
     }
@@ -680,6 +680,12 @@ public class MMDCameraController {
         this.anchorYaw = host.getYRot();
         this.watchingHostUUID = hostUUID;
 
+        this.cinematicMode = com.shiroha.mmdskin.config.StageConfig.getInstance().cinematicMode;
+        if (this.cinematicMode) {
+            this.previousHideGui = mc.options.hideGui;
+            mc.options.hideGui = true;
+        }
+
         this.lastTickTimeNs = System.nanoTime();
         this.escWasPressed = false;
         this.mouseReleased = false;
@@ -687,6 +693,7 @@ public class MMDCameraController {
         this.currentFrame = 0.0f;
         this.state = StageState.WATCHING;
     }
+
 
     public void setWatchCamera(long cameraAnimHandle, float heightOffset) {
         if (state != StageState.WATCHING) return;
@@ -707,16 +714,102 @@ public class MMDCameraController {
         }
     }
 
+    public void setWatchMotion(long motionAnim, long modelHandle, String modelName) {
+        if (state != StageState.WATCHING) return;
+        this.motionAnimHandle = motionAnim;
+        this.modelHandle = modelHandle;
+        this.modelName = modelName;
+        if (modelHandle != 0) {
+            NativeFunc nf = NativeFunc.GetInst();
+            nf.SetAutoBlinkEnabled(modelHandle, false);
+            nf.SetEyeTrackingEnabled(modelHandle, false);
+        }
+    }
+
+    public void loadWatchAudio(String audioPath) {
+        if (state != StageState.WATCHING) return;
+        if (audioPlayer.load(audioPath)) {
+            audioPlayer.play();
+        } else {
+            logger.warn("[WATCHING] 音频加载失败: {}", audioPath);
+        }
+    }
+
     public void exitWatchMode() {
+        exitWatchMode(true);
+    }
+    
+    public void exitWatchMode(boolean sendLeave) {
         if (state != StageState.WATCHING) return;
 
+        audioPlayer.cleanup();
+
+        if (cinematicMode) {
+            Minecraft.getInstance().options.hideGui = previousHideGui;
+        }
+
         Minecraft mc = Minecraft.getInstance();
+        com.shiroha.mmdskin.ui.stage.StageInviteManager mgr = 
+            com.shiroha.mmdskin.ui.stage.StageInviteManager.getInstance();
+            
         if (mc.player != null) {
             com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper.endStageAnim(mc.player);
             StageNetworkHandler.sendStageEnd();
+            
+            if (sendLeave && mgr.getWatchingHostUUID() != null) {
+                StageNetworkHandler.sendLeave(mgr.getWatchingHostUUID());
+            }
+
+            this.anchorX = mc.player.getX();
+            this.anchorY = mc.player.getY();
+            this.anchorZ = mc.player.getZ();
+            this.anchorYaw = mc.player.getYRot();
         }
 
-        doExitWatch();
+        computeIntroAndStandby(mc);
+
+        clearLocalPlayerStageFlags();
+
+        NativeFunc nf = NativeFunc.GetInst();
+        restoreModelState(nf);
+        if (this.motionAnimHandle != 0) {
+            nf.DeleteAnimation(this.motionAnimHandle);
+        }
+
+        if (watchCameraAnimHandle != 0) {
+            nf.DeleteAnimation(watchCameraAnimHandle);
+            watchCameraAnimHandle = 0;
+        }
+
+        this.cameraAnimHandle = 0;
+        this.motionAnimHandle = 0;
+        this.modelHandle = 0;
+        this.modelName = null;
+        this.currentFrame = 0.0f;
+        this.maxFrame = 0.0f;
+
+        this.outroStartX = cameraX;
+        this.outroStartY = cameraY;
+        this.outroStartZ = cameraZ;
+        this.outroStartPitch = cameraPitch;
+        this.outroStartYaw = cameraYaw;
+        this.outroStartFov = cameraFov;
+
+        this.outroElapsed = 0.0f;
+        this.lastTickTimeNs = System.nanoTime();
+        this.outroIsGuest = true;
+
+        restoreMouseGrab();
+
+        if (sendLeave) {
+            mgr.stopWatching();
+            this.watchingHostUUID = null;
+        } else {
+            mgr.stopWatchingStageOnly();
+            this.waitingForHost = true;
+        }
+        
+        this.state = StageState.OUTRO;
     }
 
 
@@ -750,30 +843,6 @@ public class MMDCameraController {
         this.maxFrame = 0.0f;
         this.waitingForHost = false;
         this.state = StageState.INACTIVE;
-    }
-
-    private void doExitWatch() {
-        if (watchCameraAnimHandle != 0) {
-            NativeFunc.GetInst().DeleteAnimation(watchCameraAnimHandle);
-            watchCameraAnimHandle = 0;
-        }
-
-        restoreMouseGrab();
-
-        Minecraft mc = Minecraft.getInstance();
-        if (savedCameraType != null) {
-            mc.options.setCameraType(savedCameraType);
-            savedCameraType = null;
-        }
-
-        this.state = StageState.INACTIVE;
-        this.waitingForHost = false;
-        this.watchingHostUUID = null;
-        this.currentFrame = 0.0f;
-        this.maxFrame = 0.0f;
-
-        com.shiroha.mmdskin.ui.stage.StageInviteManager.getInstance().stopWatching();
-        KeyMapping.releaseAll();
     }
 
     private void updateWatching() {
@@ -819,7 +888,7 @@ public class MMDCameraController {
         currentFrame += deltaTime * VMD_FPS * effectiveSpeed;
 
         if (currentFrame >= maxFrame) {
-            exitWatchMode();
+            exitWatchMode(true);
             return;
         }
 

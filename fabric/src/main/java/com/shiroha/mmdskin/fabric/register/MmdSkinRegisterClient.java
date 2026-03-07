@@ -77,7 +77,6 @@ public class MmdSkinRegisterClient {
     public static void Register() {
         Minecraft MCinstance = Minecraft.getInstance();
         
-        // 注入按键获取逻辑
         KeyMappingUtil.setBoundKeyGetter(k -> {
             if (k instanceof KeyMappingAccessor accessor) {
                 return accessor.mmd$getBoundKey();
@@ -85,7 +84,6 @@ public class MmdSkinRegisterClient {
             return InputConstants.UNKNOWN;
         });
 
-        // 注册按键
         KeyBindingHelper.registerKeyBinding(keyConfigWheel);
         if (MaidCompatMixinPlugin.isMaidModLoaded()) {
             KeyBindingHelper.registerKeyBinding(keyMaidConfigWheel);
@@ -94,7 +92,6 @@ public class MmdSkinRegisterClient {
             KeyBindingHelper.registerKeyBinding(keyQuickModel);
         }
         
-        // 设置模组设置界面工厂
         ConfigWheelScreen.setModSettingsScreenFactory(() -> ModConfigScreen.create(null));
         
         ActionWheelNetworkHandler.setNetworkSender(animId -> {
@@ -170,20 +167,17 @@ public class MmdSkinRegisterClient {
             }
         });
         
-        // 主配置轮盘按键事件（按住打开，松开选择）
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (MCinstance.player == null) return;
 
-            // 模型/纹理缓存 GC
             MMDModelManager.tick();
+            
+            com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper.tickPending();
 
-            // 远程舞台音频距离衰减（每秒更新一次）
             StageAudioPlayer.tickRemoteAttenuation();
             
-            // 骨骼同步采样
             BoneSyncManager.tickLocal();
             
-            // 舞台模式死亡/复活检测
             if (MCinstance.player != null) {
                 if (!MCinstance.player.isAlive()) {
                     MMDCameraController controller = MMDCameraController.getInstance();
@@ -193,7 +187,6 @@ public class MmdSkinRegisterClient {
                 }
             }
 
-            // 主配置轮盘按键处理
             if (MCinstance.screen == null || MCinstance.screen instanceof ConfigWheelScreen) {
                 boolean keyDown = keyConfigWheel.isDown();
                 if (keyDown && !configWheelKeyWasDown) {
@@ -204,7 +197,6 @@ public class MmdSkinRegisterClient {
                 configWheelKeyWasDown = false;
             }
             
-            // 快捷模型切换按键处理
             if (MCinstance.screen == null) {
                 for (int i = 0; i < keyQuickModels.length; i++) {
                     while (keyQuickModels[i].consumeClick()) {
@@ -213,7 +205,6 @@ public class MmdSkinRegisterClient {
                 }
             }
             
-            // 女仆配置轮盘按键处理
             if (MaidCompatMixinPlugin.isMaidModLoaded()) {
                 if (MCinstance.screen == null || MCinstance.screen instanceof MaidConfigWheelScreen) {
                     boolean keyDown = keyMaidConfigWheel.isDown();
@@ -243,7 +234,6 @@ public class MmdSkinRegisterClient {
 
         // 注册网络接收器
         ClientPlayNetworking.registerGlobalReceiver(MmdSkinRegisterCommon.SKIN_S2C, (client, handler, buf, responseSender) -> {
-            // 复制缓冲区数据，因为需要在主线程处理
             FriendlyByteBuf copiedBuf = new FriendlyByteBuf(buf.copy());
             client.execute(() -> {
                 MmdSkinNetworkPack.doInClient(copiedBuf);
@@ -251,25 +241,21 @@ public class MmdSkinRegisterClient {
             });
         });
         
-        // 注册玩家加入服务器事件（广播自己的模型选择）
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             client.execute(() -> {
                 LocalPlayer player = client.player;
                 if (player != null) {
-                    // 延迟一点广播，确保网络连接稳定
                     String selectedModel = com.shiroha.mmdskin.ui.config.ModelSelectorConfig.getInstance()
                         .getPlayerModel(player.getName().getString());
                     if (selectedModel != null && !selectedModel.isEmpty() && 
                         !selectedModel.equals(com.shiroha.mmdskin.config.UIConstants.DEFAULT_MODEL_NAME)) {
                         PlayerModelSyncManager.broadcastLocalModelSelection(player.getUUID(), selectedModel);
                     }
-                    // 请求所有玩家的模型信息
                     MmdSkinNetworkPack.sendToServer(NetworkOpCode.REQUEST_ALL_MODELS, player.getUUID(), "");
                 }
             });
         });
         
-        // 注册玩家断开连接事件（清理远程玩家缓存 + 舞台模式）
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             MMDCameraController.getInstance().exitStageMode();
             PlayerModelSyncManager.onDisconnect();
@@ -278,16 +264,12 @@ public class MmdSkinRegisterClient {
             com.shiroha.mmdskin.ui.stage.StageInviteManager.getInstance().onDisconnect();
         });
         
-        // 注册性能调试 HUD 渲染
         net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
             (graphics, tickDelta) -> com.shiroha.mmdskin.renderer.core.PerformanceHud.render(graphics)
         );
         
     }
     
-    /**
-     * 尝试打开女仆配置轮盘
-     */
     private static void tryOpenMaidConfigWheel(Minecraft mc) {
         HitResult hitResult = mc.hitResult;
         if (hitResult == null || hitResult.getType() != HitResult.Type.ENTITY) {

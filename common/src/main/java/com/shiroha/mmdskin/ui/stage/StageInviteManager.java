@@ -18,7 +18,7 @@ public final class StageInviteManager {
     private static final StageInviteManager INSTANCE = new StageInviteManager();
     private static final double NEARBY_RANGE = 15.0;
 
-    public enum MemberState { NONE, PENDING, ACCEPTED, DECLINED }
+    public enum MemberState { NONE, PENDING, ACCEPTED, DECLINED, READY }
 
     private final ConcurrentHashMap<UUID, MemberState> memberStates = new ConcurrentHashMap<>();
     private final CopyOnWriteArrayList<AbstractClientPlayer> nearbyPlayers = new CopyOnWriteArrayList<>();
@@ -57,6 +57,33 @@ public final class StageInviteManager {
 
     public void onMemberDeclined(UUID memberUUID) {
         memberStates.put(memberUUID, MemberState.DECLINED);
+    }
+
+    public void onMemberReady(UUID memberUUID) {
+        memberStates.put(memberUUID, MemberState.READY);
+    }
+
+    public void onMemberLeft(UUID memberUUID) {
+        memberStates.put(memberUUID, MemberState.NONE);
+    }
+
+    /** 被邀请者是否选择使用房主镜头 */
+    private volatile boolean useHostCamera = true;
+
+    public boolean isUseHostCamera() { return useHostCamera; }
+
+    public void setUseHostCamera(boolean use) { this.useHostCamera = use; }
+
+    /** 房主端：检查所有已接受的成员是否全部 READY */
+    public boolean allMembersReady() {
+        boolean hasMembers = false;
+        for (MemberState state : memberStates.values()) {
+            if (state == MemberState.ACCEPTED || state == MemberState.READY) {
+                hasMembers = true;
+                if (state != MemberState.READY) return false;
+            }
+        }
+        return hasMembers;
     }
 
     public boolean hasPendingInvite() {
@@ -99,11 +126,16 @@ public final class StageInviteManager {
         this.watchingHostUUID = null;
         this.watchingStageData = null;
     }
+    
+    public void stopWatchingStageOnly() {
+        this.watchingStage = false;
+        this.watchingStageData = null;
+    }
 
     public Set<UUID> getAcceptedMembers() {
         Set<UUID> accepted = new HashSet<>();
         memberStates.forEach((uuid, state) -> {
-            if (state == MemberState.ACCEPTED) accepted.add(uuid);
+            if (state == MemberState.ACCEPTED || state == MemberState.READY) accepted.add(uuid);
         });
         return Collections.unmodifiableSet(accepted);
     }
@@ -116,12 +148,14 @@ public final class StageInviteManager {
 
     public void resetHostState() {
         memberStates.clear();
+        useHostCamera = true;
     }
 
     public void onDisconnect() {
         memberStates.clear();
         nearbyPlayers.clear();
         pendingInviteHost = null;
+        useHostCamera = true;
         stopWatching();
     }
 

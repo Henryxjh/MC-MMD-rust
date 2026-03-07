@@ -49,10 +49,6 @@ import org.lwjgl.glfw.GLFW;
 /**
  * Forge 客户端注册
  * 负责按键绑定、网络通信和实体渲染器注册
- * 
- * 使用两个事件总线：
- * - MOD 事件总线：按键注册、实体渲染器注册
- * - Forge 事件总线：按键输入处理、客户端 Tick
  */
 public class MmdSkinRegisterClient {
     static final Logger logger = LogManager.getLogger();
@@ -101,25 +97,12 @@ public class MmdSkinRegisterClient {
      * 注册事件监听器到两个事件总线
      */
     public static void Register() {
-        // 注入按键获取逻辑
         KeyMappingUtil.setBoundKeyGetter(k -> k.getKey());
-
-        // 注册到 Forge 事件总线（按键输入、客户端 Tick）
-        // 注意：按键注册和实体渲染器注册已由 MmdSkinForgeClient 中的 @SubscribeEvent 处理
-        //（RegisterKeyMappingsEvent 和 EntityRenderersEvent 在 FMLClientSetupEvent 之前触发）
         MinecraftForge.EVENT_BUS.register(ForgeEventHandler.class);
-        
-        // 设置模组设置界面工厂
         ConfigWheelScreen.setModSettingsScreenFactory(() -> ModConfigScreen.create(null));
-        
-        // 注册网络发送器
         registerNetworkSenders();
-        
     }
     
-    /**
-     * 注册网络发送器（与 Fabric 一致）
-     */
     private static void registerNetworkSenders() {
         if (networkSendersRegistered) return;
         networkSendersRegistered = true;
@@ -203,9 +186,6 @@ public class MmdSkinRegisterClient {
         });
     }
     
-    /**
-     * MOD 事件：注册按键映射
-     */
     @OnlyIn(Dist.CLIENT)
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(keyConfigWheel);
@@ -214,9 +194,6 @@ public class MmdSkinRegisterClient {
             event.register(keyQuickModel);
         }
     }    
-    /**
-     * MOD 事件：注册实体渲染器
-     */
     @OnlyIn(Dist.CLIENT)
     public static void onRegisterEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {
         Minecraft MCinstance = Minecraft.getInstance();
@@ -243,15 +220,9 @@ public class MmdSkinRegisterClient {
         }
     }
     
-    /**
-     * Forge 事件处理器（注册到 Forge 事件总线）
-     */
     @Mod.EventBusSubscriber(value = Dist.CLIENT, modid = MmdSkin.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
     public static class ForgeEventHandler {
         
-        /**
-         * 客户端 Tick 事件 - 处理按键状态（与 Fabric 的 ClientTickEvents 对应）
-         */
         @SubscribeEvent
         public static void onClientTick(TickEvent.ClientTickEvent event) {
             if (event.phase != TickEvent.Phase.END) return;
@@ -261,6 +232,9 @@ public class MmdSkinRegisterClient {
 
             // 模型/纹理缓存 GC
             MMDModelManager.tick();
+            
+            // 舞台动画待处理队列重试
+            com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper.tickPending();
 
             // 远程舞台音频距离衰减（每秒更新一次）
             StageAudioPlayer.tickRemoteAttenuation();
@@ -297,9 +271,6 @@ public class MmdSkinRegisterClient {
             }
         }
         
-        /**
-         * 尝试打开女仆配置轮盘
-         */
         private static void tryOpenMaidConfigWheel(Minecraft mc) {
             HitResult hitResult = mc.hitResult;
             if (hitResult == null || hitResult.getType() != HitResult.Type.ENTITY) {
@@ -316,9 +287,6 @@ public class MmdSkinRegisterClient {
             }
         }
         
-        /**
-         * 玩家加入服务器事件（广播自己的模型选择）
-         */
         @SubscribeEvent
         public static void onPlayerLoggedIn(ClientPlayerNetworkEvent.LoggingIn event) {
             Minecraft mc = Minecraft.getInstance();
@@ -334,9 +302,6 @@ public class MmdSkinRegisterClient {
             }
         }
         
-        /**
-         * 玩家断开连接事件（清理远程玩家缓存）
-         */
         @SubscribeEvent
         public static void onPlayerLoggedOut(ClientPlayerNetworkEvent.LoggingOut event) {
             MMDCameraController.getInstance().exitStageMode();
@@ -345,9 +310,6 @@ public class MmdSkinRegisterClient {
             com.shiroha.mmdskin.ui.stage.StageInviteManager.getInstance().onDisconnect();
         }
 
-        /**
-         * 玩家死亡事件 - 退出舞台模式
-         */
         @SubscribeEvent
         public static void onPlayerDeath(LivingDeathEvent event) {
             Minecraft mc = Minecraft.getInstance();
@@ -359,17 +321,11 @@ public class MmdSkinRegisterClient {
             }
         }
 
-        /**
-         * HUD 渲染事件 - 性能调试 HUD
-         */
         @SubscribeEvent
         public static void onRenderGui(net.minecraftforge.client.event.RenderGuiEvent.Post event) {
             com.shiroha.mmdskin.renderer.core.PerformanceHud.render(event.getGuiGraphics());
         }
         
-        /**
-         * 玩家复活事件 - 确保退出舞台模式
-         */
         @SubscribeEvent
         public static void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
             Minecraft mc = Minecraft.getInstance();

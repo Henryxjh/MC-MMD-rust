@@ -183,6 +183,7 @@ public class StageAssignPanel {
         switch (state) {
             case PENDING:  tag = "..."; color = STATE_PENDING_COLOR; break;
             case ACCEPTED: tag = "✓";   color = ASSIGNED;           break;
+            case READY:    tag = "★";   color = CHECKBOX_ON;        break;
             case DECLINED: tag = "✗";   color = STATE_DECLINED_COLOR; break;
             default:       tag = "▶";   color = ACCENT;             break;
         }

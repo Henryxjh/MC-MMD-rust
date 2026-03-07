@@ -246,8 +246,7 @@ impl MMDPhysics {
             let rot_inv = Mat3::from_mat4(model_transform).transpose();
             let local_vel = rot_inv * world_vel;
 
-            // 惯性速度（反方向 + 右手→左手 Z 取反）
-            // 反向(-x, -y, -z) + Z翻转(z→-z) = (-x, -y, z)
+            // 模型局部空间惯性（Z-flip 坐标系中 Z 方向需取反）
             let inertia_vel = Vec3::new(
                 -local_vel.x * config.inertia_strength,
                 -local_vel.y * config.inertia_strength,

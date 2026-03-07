@@ -92,6 +92,9 @@ pub struct MmdModel {
     
     debug_logged: bool,
     
+    /// VRM 模型标志（影响坐标系处理）
+    is_vrm: bool,
+    
     // 模型全局变换
     model_transform: Mat4,
     
@@ -235,6 +238,7 @@ impl MmdModel {
             is_blinking: false,
             blink_morph_index: None,
             debug_logged: false,
+            is_vrm: false,
             model_transform: Mat4::IDENTITY,
             physics: None,
             physics_enabled: false,
@@ -1171,12 +1175,9 @@ impl MmdModel {
     }
     
     /// 设置模型位置和朝向（用于惯性计算）
-    /// 位置用于计算速度，yaw 用于将世界速度转换到模型局部空间
     pub fn set_model_position_and_yaw(&mut self, x: f32, y: f32, z: f32, yaw: f32) {
-        // 构建带旋转的变换矩阵
         let cos_y = yaw.cos();
         let sin_y = yaw.sin();
-        // Y轴旋转矩阵 + 平移
         self.model_transform = Mat4::from_cols(
             Vec4::new(cos_y, 0.0, sin_y, 0.0),
             Vec4::new(0.0, 1.0, 0.0, 0.0),
@@ -1188,6 +1189,16 @@ impl MmdModel {
     /// 获取模型全局变换
     pub fn model_transform(&self) -> Mat4 {
         self.model_transform
+    }
+
+    /// 设置 VRM 模型标志
+    pub fn set_vrm(&mut self, is_vrm: bool) {
+        self.is_vrm = is_vrm;
+    }
+
+    /// 是否为 VRM 模型
+    pub fn is_vrm(&self) -> bool {
+        self.is_vrm
     }
 
     /// 获取右手矩阵
@@ -1687,8 +1698,10 @@ impl MmdModel {
     /// 应用 VPD 骨骼姿势覆盖到 BoneManager
     fn apply_vpd_bone_overrides(&mut self) {
         for (&bone_index, &(translation, rotation)) in &self.vpd_bone_overrides {
-            self.bone_manager.set_bone_translation(bone_index, translation);
-            self.bone_manager.set_bone_rotation(bone_index, rotation);
+            let t = self.bone_manager.convert_vmd_translation(translation);
+            let r = self.bone_manager.convert_vmd_rotation(rotation);
+            self.bone_manager.set_bone_translation(bone_index, t);
+            self.bone_manager.set_bone_rotation(bone_index, r);
         }
     }
     

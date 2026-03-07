@@ -97,6 +97,7 @@ public class StageInvitePanel {
         switch (state) {
             case PENDING:  tag = "...";  color = STATE_PENDING;  break;
             case ACCEPTED: tag = "\u2713"; color = STATE_ACCEPTED; break;
+            case READY:    tag = "\u2605"; color = STATE_ACCEPTED; break;
             case DECLINED: tag = "\u2717"; color = STATE_DECLINED; break;
             default: tag = "\u25B6"; color = ACCENT; break;
         }
@@ -111,7 +112,9 @@ public class StageInvitePanel {
         UUID uuid = player.getUUID();
         StageInviteManager mgr = StageInviteManager.getInstance();
 
-        if (mgr.getMemberState(uuid) == StageInviteManager.MemberState.NONE) {
+        StageInviteManager.MemberState state = mgr.getMemberState(uuid);
+        if (state == StageInviteManager.MemberState.NONE
+                || state == StageInviteManager.MemberState.DECLINED) {
             mgr.sendInvite(uuid);
             return true;
         }

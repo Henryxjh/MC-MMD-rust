@@ -10,7 +10,8 @@ use std::ptr;
 use std::sync::Arc;
 
 use crate::animation::{VmdAnimation, VmdFile};
-use crate::model::load_pmx;
+use crate::animation::fbx_loader;
+use crate::model::{load_pmx, load_vrm};
 use crate::texture::load_texture;
 
 use super::{register_animation, register_model, register_texture, ANIMATIONS, MODELS, TEXTURES};
@@ -745,13 +746,30 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_LoadAnimation(
         Err(_) => return 0,
     };
 
-    match VmdFile::load(&filename_str) {
-        Ok(vmd) => {
-            let animation = VmdAnimation::from_vmd_file(vmd);
-            register_animation(animation)
+    // 支持 "path.fbx#StackName" 语法选择指定 AnimationStack
+    let (file_path, stack_name) = if let Some(pos) = filename_str.rfind('#') {
+        let lower = filename_str[..pos].to_ascii_lowercase();
+        if lower.ends_with(".fbx") {
+            (&filename_str[..pos], Some(&filename_str[pos + 1..]))
+        } else {
+            (filename_str.as_str(), None)
         }
+    } else {
+        (filename_str.as_str(), None)
+    };
+
+    let lower = file_path.to_ascii_lowercase();
+    let result = if lower.ends_with(".fbx") {
+        fbx_loader::load_fbx_animation(file_path, stack_name).map(|a| register_animation(a))
+    } else {
+        VmdFile::load(file_path)
+            .map(|vmd| register_animation(VmdAnimation::from_vmd_file(vmd)))
+    };
+
+    match result {
+        Ok(handle) => handle,
         Err(e) => {
-            log::error!("Failed to load VMD: {}", e);
+            log::error!("Failed to load animation: {}", e);
             0
         }
     }
@@ -2968,5 +2986,44 @@ pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_SetVRHandMode(
     if let Some(model_arc) = models.get(&model) {
         let mut m = model_arc.lock().unwrap();
         m.set_vr_hand_mode(mode as u8);
+    }
+}
+
+/// 加载 VRM 模型
+#[no_mangle]
+pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_LoadModelVRM(
+    mut env: JNIEnv,
+    _class: JClass,
+    filename: JString,
+    _dir: JString,
+    _layer_count: jlong,
+) -> jlong {
+    let filename_str: String = match env.get_string(&filename) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+
+    match load_vrm(&filename_str) {
+        Ok(model) => register_model(model),
+        Err(e) => {
+            log::error!("Failed to load VRM: {}", e);
+            0
+        }
+    }
+}
+
+/// 查询模型是否为 VRM 格式
+#[no_mangle]
+pub extern "system" fn Java_com_shiroha_mmdskin_NativeFunc_IsVrmModel(
+    _env: JNIEnv,
+    _class: JClass,
+    model: jlong,
+) -> jboolean {
+    let models = MODELS.read().unwrap();
+    if let Some(m) = models.get(&model) {
+        let m = m.lock().unwrap();
+        if m.is_vrm() { 1 } else { 0 }
+    } else {
+        0
     }
 }

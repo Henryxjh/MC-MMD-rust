@@ -8,8 +8,6 @@ import java.util.function.Consumer;
 
 /**
  * 舞台模式网络通信
- * opCode 7: 舞台开始, 8: 舞台结束, 9: 舞台音频
- * opCode 11: 多人舞台（子操作编码在 animId 中）
  */
 public class StageNetworkHandler {
     private static final Logger logger = LogManager.getLogger();
@@ -52,8 +50,16 @@ public class StageNetworkHandler {
         sendMulti("WATCH_END|" + targetUUID);
     }
 
+    public static void sendLeave(UUID hostUUID) {
+        sendMulti("LEAVE|" + hostUUID);
+    }
+
     public static void sendFrameSync(float currentFrame) {
         sendMulti("SYNC_FRAME|" + currentFrame);
+    }
+
+    public static void sendReady(UUID hostUUID, boolean useHostCamera) {
+        sendMulti("READY|" + hostUUID + "|" + (useHostCamera ? "1" : "0"));
     }
 
     private static void sendMulti(String data) {

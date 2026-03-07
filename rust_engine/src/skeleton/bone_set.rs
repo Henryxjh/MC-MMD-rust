@@ -46,6 +46,9 @@ pub struct BoneSet {
     
     /// 更新标志
     needs_hierarchy_update: bool,
+    
+    /// VRM 标志（VMD 旋转/平移需要额外坐标系转换）
+    is_vrm: bool,
 }
 
 impl BoneSet {
@@ -60,6 +63,7 @@ impl BoneSet {
             physics_bone_indices: HashSet::new(),
             children_cache: Vec::new(),
             needs_hierarchy_update: true,
+            is_vrm: false,
         }
     }
     
@@ -460,7 +464,7 @@ impl BoneSet {
         }
     }
     
-    /// 添加骨骼旋转
+    /// 添加骨骼旋转（头部/眼球追踪等非 VMD 数据，不做坐标系转换）
     pub fn add_bone_rotation(&mut self, index: usize, rotation: Quat) {
         if let Some(bone) = self.links.get_mut(index) {
             bone.animation_rotate = bone.animation_rotate * rotation;
@@ -504,10 +508,8 @@ impl BoneSet {
             return;
         }
         
-        // 1. 设置全局变换
         self.links[index].local_to_world = transform;
         
-        // 2. 反推局部变换
         let parent_idx = self.links[index].parent_index;
         let local_transform = if parent_idx >= 0 && (parent_idx as usize) < self.links.len() {
             let parent_global = self.links[parent_idx as usize].local_to_world;
@@ -517,12 +519,11 @@ impl BoneSet {
         };
         self.links[index].local_to_parent = local_transform;
         
-        // 3. 从 local_transform 提取动画数据
         let (_, rotation, translation) = local_transform.to_scale_rotation_translation();
-        self.links[index].animation_rotate = rotation;
+        let p = self.links[index].parent_rest_rotation;
+        self.links[index].animation_rotate = p * rotation * self.links[index].rest_rotation.inverse() * p.inverse();
         self.links[index].animation_translate = translation - self.links[index].body_shift;
         
-        // 4. 递归更新子骨骼
         self.update_children_global_transform(index);
     }
     
@@ -544,7 +545,8 @@ impl BoneSet {
         self.links[index].local_to_parent = local_transform;
         
         let (_, rotation, translation) = local_transform.to_scale_rotation_translation();
-        self.links[index].animation_rotate = rotation;
+        let p = self.links[index].parent_rest_rotation;
+        self.links[index].animation_rotate = p * rotation * self.links[index].rest_rotation.inverse() * p.inverse();
         self.links[index].animation_translate = translation - self.links[index].body_shift;
     }
     
@@ -613,6 +615,39 @@ impl BoneSet {
         if index < self.skinning_matrices.len() {
             self.skinning_matrices[index] = matrix;
         }
+    }
+    
+    /// 覆盖指定骨骼的逆绑定矩阵（VRM 加载时用 glTF IBM 替换纯平移版本）
+    #[inline]
+    pub fn set_inverse_init(&mut self, index: usize, matrix: Mat4) {
+        if let Some(bone) = self.links.get_mut(index) {
+            bone.inverse_init = matrix;
+        }
+    }
+    
+    /// 标记为 VRM 骨骼系统（VMD 动画旋转/平移自动做 Y 轴 180° 坐标系转换）
+    #[inline]
+    pub fn set_vrm(&mut self, is_vrm: bool) {
+        self.is_vrm = is_vrm;
+    }
+    
+    #[inline]
+    pub fn is_vrm(&self) -> bool {
+        self.is_vrm
+    }
+    
+    /// VMD→VRM 旋转转换
+    ///
+    /// VRM 加载时已做 Z-flip，与 PMX 在同一坐标空间，无需额外转换
+    #[inline]
+    pub fn convert_vmd_rotation(&self, q: Quat) -> Quat {
+        q
+    }
+    
+    /// VMD→VRM 平移转换
+    #[inline]
+    pub fn convert_vmd_translation(&self, v: Vec3) -> Vec3 {
+        v
     }
     
     /// 更新蒙皮矩阵
