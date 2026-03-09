@@ -1,182 +1,143 @@
 package com.shiroha.mmdskin.ui.network;
 
-import com.shiroha.mmdskin.ui.stage.StageInviteManager;
+import com.shiroha.mmdskin.stage.application.StageSessionService;
+import com.shiroha.mmdskin.stage.domain.model.StageCameraMode;
+import com.shiroha.mmdskin.stage.domain.model.StageDescriptor;
+import com.shiroha.mmdskin.stage.domain.model.StageInviteDecision;
+import com.shiroha.mmdskin.stage.protocol.StagePacket;
+import com.shiroha.mmdskin.stage.protocol.StagePacketCodec;
+import com.shiroha.mmdskin.stage.protocol.StagePacketType;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * 舞台模式网络通信。
+ * 舞台网络发送入口。
  */
-public class StageNetworkHandler {
-    private static final Logger logger = LogManager.getLogger();
+public final class StageNetworkHandler {
+    private static final Logger LOGGER = LogManager.getLogger();
 
-    private static Consumer<String> stageStartSender;
-    private static Runnable stageEndSender;
     private static Consumer<String> stageMultiSender;
 
-    public static void setStageStartSender(Consumer<String> sender) {
-        stageStartSender = sender;
-    }
-
-    public static void setStageEndSender(Runnable sender) {
-        stageEndSender = sender;
+    private StageNetworkHandler() {
     }
 
     public static void setStageMultiSender(Consumer<String> sender) {
         stageMultiSender = sender;
     }
 
-    public static void sendStageStart(String stageData) {
-        if (stageStartSender != null) {
-            try {
-                stageStartSender.accept(stageData);
-            } catch (Exception e) {
-                logger.error("广播舞台开始失败", e);
-            }
-        }
-    }
-
-    public static void sendStageEnd() {
-        if (stageEndSender != null) {
-            try {
-                stageEndSender.run();
-            } catch (Exception e) {
-                logger.error("广播舞台结束失败", e);
-            }
-        }
-    }
-
     public static void sendStageInvite(UUID targetUUID, UUID sessionId) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.INVITE, targetUUID, sessionId);
-        sendMultiMessage(message);
-        sendLegacyMulti("INVITE|" + targetUUID);
+        StagePacket packet = directedPacket(StagePacketType.INVITE_REQUEST, targetUUID, sessionId);
+        sendStagePacket(packet);
     }
 
     public static void sendInviteCancel(UUID targetUUID, UUID sessionId) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.INVITE_CANCEL, targetUUID, sessionId);
-        sendMultiMessage(message);
-        sendLegacyMulti("INVITE_CANCEL|" + targetUUID);
+        StagePacket packet = directedPacket(StagePacketType.INVITE_CANCEL, targetUUID, sessionId);
+        sendStagePacket(packet);
     }
 
-    public static void sendInviteResponse(UUID hostUUID, UUID sessionId, StageSessionMessage.Reply reply) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.INVITE_REPLY, hostUUID, sessionId);
-        message.reply = reply;
-        sendMultiMessage(message);
-        if (reply == StageSessionMessage.Reply.ACCEPT) {
-            sendLegacyMulti("ACCEPT|" + hostUUID);
-        } else if (reply == StageSessionMessage.Reply.DECLINE || reply == StageSessionMessage.Reply.BUSY) {
-            sendLegacyMulti("DECLINE|" + hostUUID);
-        }
+    public static void sendInviteResponse(UUID hostUUID, UUID sessionId, StageInviteDecision decision) {
+        StagePacket packet = directedPacket(StagePacketType.INVITE_RESPONSE, hostUUID, sessionId);
+        packet.inviteDecision = decision;
+        sendStagePacket(packet);
     }
 
-    public static void sendSessionSnapshot(UUID targetUUID, UUID sessionId,
-                                           List<StageSessionMessage.MemberSnapshot> members) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.SESSION_SNAPSHOT, targetUUID, sessionId);
-        message.members = members;
-        sendMultiMessage(message);
-    }
-
-    public static void sendReady(UUID hostUUID, UUID sessionId, boolean ready, boolean useHostCamera) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.READY_STATE, hostUUID, sessionId);
-        message.ready = ready;
-        message.useHostCamera = useHostCamera;
-        sendMultiMessage(message);
-        if (ready) {
-            sendLegacyMulti("READY|" + hostUUID + "|" + (useHostCamera ? "1" : "0"));
-        }
+    public static void sendReady(UUID hostUUID, UUID sessionId, boolean ready, boolean useHostCamera,
+                                 String motionPackName, List<String> motionFiles) {
+        StagePacket packet = directedPacket(StagePacketType.READY_UPDATE, hostUUID, sessionId);
+        packet.ready = ready;
+        packet.cameraMode = StageCameraMode.fromUseHostCamera(useHostCamera);
+        packet.motionPackName = motionPackName;
+        packet.motionFiles = motionFiles != null ? List.copyOf(motionFiles) : Collections.emptyList();
+        sendStagePacket(packet);
     }
 
     public static void sendLeave(UUID hostUUID, UUID sessionId) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.MEMBER_LEAVE, hostUUID, sessionId);
-        sendMultiMessage(message);
-        sendLegacyMulti("LEAVE|" + hostUUID);
+        StagePacket packet = directedPacket(StagePacketType.MEMBER_LEAVE, hostUUID, sessionId);
+        sendStagePacket(packet);
     }
 
-    public static void sendSessionDissolve(UUID targetUUID, UUID sessionId) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.SESSION_DISSOLVE, targetUUID, sessionId);
-        sendMultiMessage(message);
-        sendLegacyMulti("SESSION_DISSOLVE|" + targetUUID);
+    public static void sendSessionDissolve(UUID sessionId) {
+        StagePacket packet = new StagePacket(StagePacketType.SESSION_DISSOLVE);
+        if (sessionId != null) {
+            packet.sessionId = sessionId.toString();
+        }
+        sendStagePacket(packet);
     }
 
-    public static void sendStageWatch(UUID targetUUID, UUID sessionId, String stageData,
+    public static void sendStageWatch(UUID targetUUID, UUID sessionId, StageDescriptor descriptor,
                                       float heightOffset, float startFrame) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.WATCH_START, targetUUID, sessionId);
-        message.stageData = stageData;
-        message.heightOffset = heightOffset;
-        message.frame = startFrame;
-        sendMultiMessage(message);
-        sendLegacyMulti("WATCH_START|" + targetUUID + "|" + stageData
-                + "|HEIGHT:" + heightOffset + "|FRAME:" + startFrame);
+        if (descriptor == null || !descriptor.isValid()) {
+            LOGGER.warn("[多人舞台] 舞台描述无效，无法发送播放开始");
+            return;
+        }
+        StagePacket packet = directedPacket(StagePacketType.PLAYBACK_START, targetUUID, sessionId);
+        packet.descriptor = descriptor.copy();
+        packet.heightOffset = heightOffset;
+        packet.frame = startFrame;
+        sendStagePacket(packet);
+    }
+
+    public static void sendRemoteStageStart(StageDescriptor descriptor) {
+        if (descriptor == null || !descriptor.isValid()) {
+            LOGGER.warn("[多人舞台] 远端舞台描述无效，无法广播开始");
+            return;
+        }
+        StagePacket packet = new StagePacket(StagePacketType.REMOTE_STAGE_START);
+        packet.descriptor = descriptor.copy();
+        sendStagePacket(packet);
+    }
+
+    public static void sendRemoteStageStop() {
+        sendStagePacket(new StagePacket(StagePacketType.REMOTE_STAGE_STOP));
     }
 
     public static void sendStageWatchEnd(UUID targetUUID, UUID sessionId) {
-        StageSessionMessage message = directed(StageSessionMessage.Type.WATCH_END, targetUUID, sessionId);
-        sendMultiMessage(message);
-        sendLegacyMulti("WATCH_END|" + targetUUID);
+        StagePacket packet = directedPacket(StagePacketType.PLAYBACK_STOP, targetUUID, sessionId);
+        sendStagePacket(packet);
     }
 
     public static void sendFrameSync(UUID sessionId, float currentFrame) {
-        StageSessionMessage message = new StageSessionMessage(StageSessionMessage.Type.FRAME_SYNC);
+        StagePacket packet = new StagePacket(StagePacketType.FRAME_SYNC);
         if (sessionId != null) {
-            message.sessionId = sessionId.toString();
+            packet.sessionId = sessionId.toString();
         }
-        message.frame = currentFrame;
-        sendMultiMessage(message);
-        sendLegacyMulti("SYNC_FRAME|" + currentFrame);
-    }
-
-    public static void sendStageWatch(UUID targetUUID, String stageData) {
-        sendStageWatch(targetUUID, StageInviteManager.getInstance().getSessionId(), stageData, 0.0f, 0.0f);
-    }
-
-    public static void sendStageWatchEnd(UUID targetUUID) {
-        sendStageWatchEnd(targetUUID, StageInviteManager.getInstance().getSessionId());
+        packet.frame = currentFrame;
+        sendStagePacket(packet);
     }
 
     public static void sendLeave(UUID hostUUID) {
-        sendLeave(hostUUID, StageInviteManager.getInstance().getSessionId());
+        sendLeave(hostUUID, StageSessionService.getInstance().getSessionId());
     }
 
-    public static void sendReady(UUID hostUUID, boolean useHostCamera) {
-        sendReady(hostUUID, StageInviteManager.getInstance().getSessionId(), true, useHostCamera);
-    }
-
-    public static void sendFrameSync(float currentFrame) {
-        sendFrameSync(StageInviteManager.getInstance().getSessionId(), currentFrame);
-    }
-
-    private static StageSessionMessage directed(StageSessionMessage.Type type, UUID targetUUID, UUID sessionId) {
-        StageSessionMessage message = new StageSessionMessage(type);
+    private static StagePacket directedPacket(StagePacketType type, UUID targetUUID, UUID sessionId) {
+        StagePacket packet = new StagePacket(type);
         if (targetUUID != null) {
-            message.targetUUID = targetUUID.toString();
+            packet.targetPlayerId = targetUUID.toString();
         }
         if (sessionId != null) {
-            message.sessionId = sessionId.toString();
+            packet.sessionId = sessionId.toString();
         }
-        return message;
+        return packet;
     }
 
-    private static void sendMultiMessage(StageSessionMessage message) {
-        sendMulti(StageSessionMessage.encode(message));
+    private static void sendStagePacket(StagePacket packet) {
+        sendMulti(StagePacketCodec.encode(packet));
     }
 
-    private static void sendMulti(String data) {
+    private static void sendMulti(String payload) {
         if (stageMultiSender == null) {
-            logger.warn("[多人舞台] stageMultiSender 未注册");
+            LOGGER.warn("[多人舞台] stageMultiSender 未注册");
             return;
         }
         try {
-            stageMultiSender.accept(data);
+            stageMultiSender.accept(payload);
         } catch (Exception e) {
-            logger.error("多人舞台消息发送失败", e);
+            LOGGER.error("多人舞台消息发送失败", e);
         }
-    }
-
-    private static void sendLegacyMulti(String data) {
-        sendMulti(data);
     }
 }

@@ -1,9 +1,7 @@
 package com.shiroha.mmdskin.renderer.render;
 
-import com.shiroha.mmdskin.config.PathConstants;
 import com.shiroha.mmdskin.config.UIConstants;
 import com.shiroha.mmdskin.renderer.animation.AnimationStateManager;
-import com.shiroha.mmdskin.renderer.camera.StageAudioPlayer;
 import com.shiroha.mmdskin.renderer.core.IMMDModel;
 import com.shiroha.mmdskin.renderer.animation.MMDAnimManager;
 import com.shiroha.mmdskin.renderer.animation.PendingAnimSignalCache;
@@ -12,18 +10,12 @@ import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.world.entity.player.Player;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-import java.io.File;
 
 /**
  * 玩家动画控制辅助类
  * 负责自定义动画播放和物理重置
  */
 public final class MmdSkinRendererPlayerHelper {
-
-    private static final Logger logger = LogManager.getLogger();
     private static final float STAGE_TRANSITION_TIME = 0.3f;
 
     public static boolean isUsingMmdModel(Player player) {
@@ -98,33 +90,8 @@ public final class MmdSkinRendererPlayerHelper {
         model.changeAnim(0, 2);
     }
     
-    /**
-     * 远程玩家舞台音频同步
-     */
-    public static void StageAudioPlay(Player player, String audioData) {
-        if (player == null || audioData == null || audioData.isEmpty()) return;
-
-        String[] parts = audioData.split("\\|");
-        if (parts.length >= 2) {
-            String packName = parts[0];
-            String audioName = parts[1];
-            // 路径安全校验（防止路径遍历攻击）
-            if (!validatePathSafety(packName) || !validatePathSafety(audioName)) {
-                logger.warn("[舞台同步] 不安全的音频路径: {}/{}", packName, audioName);
-                return;
-            }
-            String audioPath = new File(PathConstants.getStageAnimDir(), packName + File.separator + audioName).getAbsolutePath();
-            StageAudioPlayer.playRemoteAudio(player, audioPath);
-        }
-    }
-
-    private static boolean validatePathSafety(String name) {
-        return !name.contains("..") && !name.contains("/") && !name.contains("\\");
-    }
-
     public static void onDisconnect() {
         StageAnimSyncHelper.onDisconnect();
-        StageAudioPlayer.cleanupAll();
         PendingAnimSignalCache.onDisconnect();
     }
 }

@@ -1,5 +1,6 @@
 package com.shiroha.mmdskin.fabric.register;
 
+import com.shiroha.mmdskin.fabric.stage.FabricStageSessionRegistry;
 import com.shiroha.mmdskin.ui.network.NetworkOpCode;
 import com.shiroha.mmdskin.ui.network.ServerModelRegistry;
 
@@ -69,6 +70,12 @@ public class MmdSkinRegisterCommon {
                 return;
             }
 
+            if (opCode == NetworkOpCode.STAGE_MULTI && strData != null) {
+                final String stagePayload = strData;
+                server.execute(() -> FabricStageSessionRegistry.getInstance().handlePacket(server, player, stagePayload));
+                return;
+            }
+
             // 构建转发包
             final FriendlyByteBuf packetBuf = PacketByteBufs.create();
             packetBuf.writeInt(opCode);
@@ -95,6 +102,9 @@ public class MmdSkinRegisterCommon {
 
         // 玩家离线时清理服务端注册表
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register(
-                (handler, server) -> ServerModelRegistry.onPlayerLeave(handler.getPlayer().getUUID()));
+                (handler, server) -> {
+                    ServerModelRegistry.onPlayerLeave(handler.getPlayer().getUUID());
+                    FabricStageSessionRegistry.getInstance().onPlayerDisconnect(server, handler.getPlayer());
+                });
     }
 }

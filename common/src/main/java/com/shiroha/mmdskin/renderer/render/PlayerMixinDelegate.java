@@ -67,6 +67,7 @@ public final class PlayerMixinDelegate {
         }
 
         String selectedModel = PlayerModelSyncManager.getPlayerModel(player.getUUID(), playerName, isLocalPlayer);
+        String playerCacheKey = PlayerModelResolver.getCacheKey(player);
 
         // 让渡渲染权给原版流程（包括 YSM）
         if (selectedModel == null || selectedModel.isEmpty()
@@ -75,10 +76,10 @@ public final class PlayerMixinDelegate {
         }
 
         // 加载模型
-        MMDModelManager.Model modelData = MMDModelManager.GetModel(selectedModel, playerName);
+        MMDModelManager.Model modelData = MMDModelManager.GetModel(selectedModel, playerCacheKey);
 
         if (modelData == null) {
-            if (MMDModelManager.isModelPending(selectedModel, playerName)) {
+            if (MMDModelManager.isModelPending(selectedModel, playerCacheKey)) {
                 return RenderAction.CANCEL;
             }
             return RenderAction.SUPER_RENDER;
@@ -119,11 +120,8 @@ public final class PlayerMixinDelegate {
         // 远程玩家：消费延迟的动画中断信号（target 不在渲染范围时缓存的）
         if (!isLocalPlayer) {
             PendingAnimSignalCache.SignalType signal = PendingAnimSignalCache.consume(player.getUUID());
-            if (signal != null) {
-                switch (signal) {
-                    case RESET -> MmdSkinRendererPlayerHelper.ResetPhysics(player);
-                    case STAGE_END -> StageAnimSyncHelper.endStageAnim(player);
-                }
+            if (signal == PendingAnimSignalCache.SignalType.RESET) {
+                MmdSkinRendererPlayerHelper.ResetPhysics(player);
             }
         }
 

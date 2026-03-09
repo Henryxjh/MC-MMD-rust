@@ -8,13 +8,13 @@ import com.shiroha.mmdskin.maid.MaidModelNetworkHandler;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRenderFactory;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRendererPlayerHelper;
+import com.shiroha.mmdskin.stage.application.StageSessionService;
 import com.shiroha.mmdskin.ui.network.ActionWheelNetworkHandler;
 import com.shiroha.mmdskin.ui.network.MorphWheelNetworkHandler;
 import com.shiroha.mmdskin.ui.network.NetworkOpCode;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import com.shiroha.mmdskin.ui.network.StageNetworkHandler;
 import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
-import com.shiroha.mmdskin.renderer.camera.StageAudioPlayer;
 import com.shiroha.mmdskin.ui.QuickModelSwitcher;
 import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
@@ -162,21 +162,6 @@ public class MmdSkinRegisterClient {
             }
         });
         
-        StageNetworkHandler.setStageStartSender(stageData -> {
-            LocalPlayer player = MCinstance.player;
-            if (player != null) {
-                MmdSkinRegisterCommon.channel.sendToServer(
-                    new MmdSkinNetworkPack(NetworkOpCode.STAGE_START, player.getUUID(), stageData));
-            }
-        });
-        StageNetworkHandler.setStageEndSender(() -> {
-            LocalPlayer player = MCinstance.player;
-            if (player != null) {
-                MmdSkinRegisterCommon.channel.sendToServer(
-                    new MmdSkinNetworkPack(NetworkOpCode.STAGE_END, player.getUUID(), ""));
-            }
-        });
-        
         StageNetworkHandler.setStageMultiSender(data -> {
             LocalPlayer player = MCinstance.player;
             if (player != null) {
@@ -236,9 +221,6 @@ public class MmdSkinRegisterClient {
             // 舞台动画待处理队列重试
             com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper.tickPending();
 
-            // 远程舞台音频距离衰减（每秒更新一次）
-            StageAudioPlayer.tickRemoteAttenuation();
-            
             // 主配置轮盘按键处理
             if (mc.screen == null || mc.screen instanceof ConfigWheelScreen) {
                 boolean keyDown = keyConfigWheel.isDown();
@@ -307,7 +289,7 @@ public class MmdSkinRegisterClient {
             MMDCameraController.getInstance().exitStageMode();
             PlayerModelSyncManager.onDisconnect();
             MmdSkinRendererPlayerHelper.onDisconnect();
-            com.shiroha.mmdskin.ui.stage.StageInviteManager.getInstance().onDisconnect();
+            StageSessionService.getInstance().onDisconnect();
         }
 
         @SubscribeEvent

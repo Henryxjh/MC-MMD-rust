@@ -2,6 +2,7 @@ package com.shiroha.mmdskin.ui;
 
 import com.shiroha.mmdskin.config.UIConstants;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
+import com.shiroha.mmdskin.renderer.render.PlayerModelResolver;
 import com.shiroha.mmdskin.ui.config.ModelSelectorConfig;
 import com.shiroha.mmdskin.ui.network.ModelSelectorNetworkHandler;
 import net.minecraft.client.Minecraft;
@@ -57,8 +58,6 @@ public final class QuickModelSwitcher {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         
-        String playerName = mc.player.getName().getString();
-        
         // 保存配置（内部已广播联机同步）
         ModelSelectorConfig.getInstance().setSelectedModel(modelName);
         
@@ -66,6 +65,6 @@ public final class QuickModelSwitcher {
         ModelSelectorNetworkHandler.sendModelChangeToServer(modelName);
         
         // 强制重载模型缓存
-        MMDModelManager.forceReloadPlayerModels(playerName);
+        MMDModelManager.forceReloadPlayerModels(PlayerModelResolver.getCacheKey(mc.player));
     }
 }

@@ -132,8 +132,9 @@ public class ModelSelectorScreen extends Screen {
         // 仅重载本地玩家的模型（不影响其他远程玩家的模型和动画）
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         if (mc.player != null) {
-            String playerName = mc.player.getName().getString();
-            com.shiroha.mmdskin.renderer.model.MMDModelManager.forceReloadPlayerModels(playerName);
+            com.shiroha.mmdskin.renderer.model.MMDModelManager.forceReloadPlayerModels(
+                    com.shiroha.mmdskin.renderer.render.PlayerModelResolver.getCacheKey(mc.player)
+            );
         }
     }
 

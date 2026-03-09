@@ -4,6 +4,7 @@ import com.shiroha.mmdskin.NativeFunc;
 import com.shiroha.mmdskin.config.PathConstants;
 import com.shiroha.mmdskin.config.UIConstants;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
+import com.shiroha.mmdskin.renderer.render.PlayerModelResolver;
 import com.shiroha.mmdskin.ui.config.ModelSelectorConfig;
 import com.shiroha.mmdskin.ui.config.MorphWheelConfig;
 import com.shiroha.mmdskin.ui.config.MorphWheelConfigScreen;
@@ -200,7 +201,10 @@ public class MorphWheelScreen extends AbstractWheelScreen {
             return;
         }
         
-        MMDModelManager.Model m = MMDModelManager.GetModel(selectedModel, playerName);
+        MMDModelManager.Model m = MMDModelManager.GetModel(
+                selectedModel,
+                PlayerModelResolver.getCacheKey(mc.player)
+        );
         if (m == null) {
             logger.warn("未找到玩家模型: {}", selectedModel);
             return;

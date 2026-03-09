@@ -6,12 +6,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 待处理动画信号缓存
- * 当收到 RESET_PHYSICS / STAGE_END 时目标玩家不在渲染范围，
+ * 当收到 RESET_PHYSICS 时目标玩家不在渲染范围，
  * 缓存该信号，等玩家重新出现时由渲染循环应用。
  */
 public final class PendingAnimSignalCache {
-    
-    public enum SignalType { RESET, STAGE_END }
+
+    public enum SignalType { RESET }
     
     private static final Map<UUID, SignalType> pending = new ConcurrentHashMap<>();
     private static final long SIGNAL_TTL_MS = 30_000;

@@ -4,6 +4,7 @@ import com.shiroha.mmdskin.NativeFunc;
 import com.shiroha.mmdskin.config.ModelConfigData;
 import com.shiroha.mmdskin.config.ModelConfigManager;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
+import com.shiroha.mmdskin.renderer.render.PlayerModelResolver;
 import com.shiroha.mmdskin.ui.config.ModelSelectorConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -131,12 +132,14 @@ public class ModelSettingsScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         
-        String playerName = mc.player.getName().getString();
         String selectedModel = ModelSelectorConfig.getInstance().getSelectedModel();
-        
+
         if (!modelName.equals(selectedModel)) return;
-        
-        MMDModelManager.Model model = MMDModelManager.GetModel(selectedModel, playerName);
+
+        MMDModelManager.Model model = MMDModelManager.GetModel(
+                selectedModel,
+                PlayerModelResolver.getCacheKey(mc.player)
+        );
         if (model == null) return;
         
         long handle = model.model.getModelHandle();

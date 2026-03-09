@@ -4,6 +4,7 @@ import com.shiroha.mmdskin.NativeFunc;
 import com.shiroha.mmdskin.config.ModelConfigData;
 import com.shiroha.mmdskin.config.ModelConfigManager;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
+import com.shiroha.mmdskin.renderer.render.PlayerModelResolver;
 import com.shiroha.mmdskin.ui.config.ModelSelectorConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -77,17 +78,17 @@ public class MaterialVisibilityScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return null;
         
-        String playerName = mc.player.getName().getString();
         String modelName = ModelSelectorConfig.getInstance().getSelectedModel();
+        String playerCacheKey = PlayerModelResolver.getCacheKey(mc.player);
         
         if (modelName == null || modelName.isEmpty()) {
             logger.warn("玩家未选择模型");
             return null;
         }
         
-        MMDModelManager.Model model = MMDModelManager.GetModel(modelName, playerName);
+        MMDModelManager.Model model = MMDModelManager.GetModel(modelName, playerCacheKey);
         if (model == null) {
-            logger.warn("无法获取玩家模型: {}_{}", modelName, playerName);
+            logger.warn("无法获取玩家模型: {}_{}", modelName, playerCacheKey);
             return null;
         }
         

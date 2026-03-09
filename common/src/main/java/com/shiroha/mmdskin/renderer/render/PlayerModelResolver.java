@@ -21,6 +21,17 @@ public final class PlayerModelResolver {
      * 解析结果：包含模型名和玩家显示名
      */
     public record Result(MMDModelManager.Model model, String playerName) {}
+
+    public static String getCacheKey(Player player) {
+        if (player == null) return "unknown";
+
+        String uuid = player.getStringUUID();
+        if (uuid != null && !uuid.isEmpty()) {
+            return uuid;
+        }
+
+        return player.getName().getString();
+    }
     
     /**
      * 解析玩家当前绑定的 MMD 模型
@@ -41,7 +52,7 @@ public final class PlayerModelResolver {
             return null;
         }
         
-        MMDModelManager.Model m = MMDModelManager.GetModel(selectedModel, playerName);
+        MMDModelManager.Model m = MMDModelManager.GetModel(selectedModel, getCacheKey(player));
         if (m == null) {
             return null;
         }

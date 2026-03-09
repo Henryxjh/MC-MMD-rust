@@ -5,6 +5,7 @@ import com.shiroha.mmdskin.config.PathConstants;
 import com.shiroha.mmdskin.renderer.animation.MMDAnimManager;
 import com.shiroha.mmdskin.renderer.core.EntityAnimState;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
+import com.shiroha.mmdskin.renderer.render.PlayerModelResolver;
 import com.shiroha.mmdskin.ui.config.ModelSelectorConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -201,10 +202,12 @@ public class ModelAnimationScreen extends Screen {
         // 刷新当前模型的动画缓存
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
-            String playerName = mc.player.getName().getString();
             String selectedModel = ModelSelectorConfig.getInstance().getSelectedModel();
             if (modelName.equals(selectedModel)) {
-                MMDModelManager.Model model = MMDModelManager.GetModel(selectedModel, playerName);
+                MMDModelManager.Model model = MMDModelManager.GetModel(
+                        selectedModel,
+                        PlayerModelResolver.getCacheKey(mc.player)
+                );
                 if (model != null) {
                     MMDAnimManager.invalidateAnimCache(model.model);
                     // 重新加载 idle 动画

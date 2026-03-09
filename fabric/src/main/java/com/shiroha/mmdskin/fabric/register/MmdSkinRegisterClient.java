@@ -12,13 +12,13 @@ import com.shiroha.mmdskin.maid.MaidModelNetworkHandler;
 import com.shiroha.mmdskin.renderer.model.MMDModelManager;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRenderFactory;
 import com.shiroha.mmdskin.renderer.render.MmdSkinRendererPlayerHelper;
+import com.shiroha.mmdskin.stage.application.StageSessionService;
 import com.shiroha.mmdskin.ui.network.ActionWheelNetworkHandler;
 import com.shiroha.mmdskin.ui.network.MorphWheelNetworkHandler;
 import com.shiroha.mmdskin.ui.network.NetworkOpCode;
 import com.shiroha.mmdskin.ui.network.PlayerModelSyncManager;
 import com.shiroha.mmdskin.ui.network.StageNetworkHandler;
 import com.shiroha.mmdskin.renderer.camera.MMDCameraController;
-import com.shiroha.mmdskin.renderer.camera.StageAudioPlayer;
 import com.shiroha.mmdskin.ui.QuickModelSwitcher;
 import com.shiroha.mmdskin.ui.wheel.ConfigWheelScreen;
 import com.shiroha.mmdskin.ui.wheel.MaidConfigWheelScreen;
@@ -140,19 +140,6 @@ public class MmdSkinRegisterClient {
             }
         });
         
-        StageNetworkHandler.setStageStartSender(stageData -> {
-            LocalPlayer player = MCinstance.player;
-            if (player != null) {
-                MmdSkinNetworkPack.sendToServer(NetworkOpCode.STAGE_START, player.getUUID(), stageData);
-            }
-        });
-        StageNetworkHandler.setStageEndSender(() -> {
-            LocalPlayer player = MCinstance.player;
-            if (player != null) {
-                MmdSkinNetworkPack.sendToServer(NetworkOpCode.STAGE_END, player.getUUID(), "");
-            }
-        });
-        
         StageNetworkHandler.setStageMultiSender(data -> {
             LocalPlayer player = MCinstance.player;
             if (player != null) {
@@ -174,8 +161,6 @@ public class MmdSkinRegisterClient {
             
             com.shiroha.mmdskin.renderer.render.StageAnimSyncHelper.tickPending();
 
-            StageAudioPlayer.tickRemoteAttenuation();
-            
             BoneSyncManager.tickLocal();
             
             if (MCinstance.player != null) {
@@ -261,7 +246,7 @@ public class MmdSkinRegisterClient {
             PlayerModelSyncManager.onDisconnect();
             MmdSkinRendererPlayerHelper.onDisconnect();
             BoneSyncManager.onDisconnect();
-            com.shiroha.mmdskin.ui.stage.StageInviteManager.getInstance().onDisconnect();
+            StageSessionService.getInstance().onDisconnect();
         });
         
         net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
