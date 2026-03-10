@@ -65,7 +65,7 @@ public final class NativeLibraryLoader {
 
     public static boolean isAndroid() { return isAndroid; }
 
-    static final String LIBRARY_VERSION = "v1.0.3";
+    static final String LIBRARY_VERSION = "v1.0.4";
     private static final String RELEASE_BASE_URL =
             "https://github.com/shiroha-23/MC-MMD-rust/releases/download/" + LIBRARY_VERSION + "/";
 
